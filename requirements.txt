@@ -1,0 +1,54 @@
+# TQQQ Trading System Dependencies
+# Python 3.11+
+
+# Alpaca API
+alpaca-py>=0.21.0
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Technical Analysis
+ta>=0.11.0
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# HTTP Requests (for Discord webhooks, exchange rates)
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# Async Support
+asyncio-throttle>=1.0.2
+
+# Timezone Handling
+pytz>=2024.1
+
+# JSON Schema Validation
+jsonschema>=4.21.0
+
+# Resource Monitoring
+psutil>=5.9.0
+memory-profiler>=0.61.0
+
+# Web API
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# Google Cloud Platform
+google-cloud-firestore>=2.14.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# Type Checking (dev)
+mypy>=1.8.0
+
+# Formatting (dev)
+black>=24.1.0
+isort>=5.13.0

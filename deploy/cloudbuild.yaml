@@ -1,0 +1,74 @@
+# Cloud Build configuration for TQQQ Trading System
+# Builds and deploys the API server to Cloud Run
+
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-api:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-api:latest'
+      - '-f'
+      - 'deploy/Dockerfile'
+      - '.'
+
+  # Push the image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-api:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-api:latest'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tqqq-trading-api'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-api:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'GOOGLE_CLOUD_PROJECT=$PROJECT_ID,FIRESTORE_COLLECTION_PREFIX=tqqq'
+      - '--set-secrets'
+      - 'ALPACA_API_KEY=alpaca-api-key:latest,ALPACA_SECRET_KEY=alpaca-secret-key:latest'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '300'
+      - '--concurrency'
+      - '80'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '3'
+
+# Substitution variables
+substitutions:
+  _REGION: 'us-central1'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Images to be pushed
+images:
+  - 'gcr.io/$PROJECT_ID/tqqq-trading-api:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/tqqq-trading-api:latest'
+
+# Build timeout
+timeout: '1200s'

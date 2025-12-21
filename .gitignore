@@ -1,0 +1,42 @@
+# Environment
+.env
+.env.local
+
+# Credentials (NEVER commit these!)
+credentials/
+*.json
+!package.json
+!tsconfig.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports (optional - may contain sensitive data)
+reports/*.json
+reports/pdf/
+reports/*.png
+
+# Data cache
+data/cache/
+
+# Test files
+test_strategy_reload.py
