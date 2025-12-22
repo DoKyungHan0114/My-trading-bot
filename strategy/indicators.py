@@ -119,11 +119,33 @@ def calculate_bollinger_bands(
     return upper, middle, lower
 
 
+def calculate_volume_ratio(
+    volume: pd.Series,
+    period: int = 20,
+) -> pd.Series:
+    """
+    Calculate volume ratio vs moving average.
+
+    Args:
+        volume: Volume series
+        period: Lookback period for average
+
+    Returns:
+        Ratio of current volume to average volume
+    """
+    avg_volume = volume.rolling(window=period, min_periods=period).mean()
+    ratio = volume / avg_volume
+    return ratio.fillna(1.0)
+
+
 def add_all_indicators(
     df: pd.DataFrame,
     rsi_period: int = 2,
     sma_period: int = 200,
     atr_period: int = 14,
+    bb_period: int = 20,
+    bb_std_dev: float = 2.0,
+    volume_avg_period: int = 20,
 ) -> pd.DataFrame:
     """
     Add all required indicators to DataFrame.
@@ -133,6 +155,9 @@ def add_all_indicators(
         rsi_period: RSI period
         sma_period: SMA period for trend filter
         atr_period: ATR period
+        bb_period: Bollinger Bands period
+        bb_std_dev: Bollinger Bands standard deviation
+        volume_avg_period: Volume average period
 
     Returns:
         DataFrame with added indicator columns
@@ -154,5 +179,24 @@ def add_all_indicators(
 
     # Above/below SMA
     df["above_sma"] = df["close"] > df[sma_col]
+
+    # Bollinger Bands
+    bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(
+        df["close"], period=bb_period, std_dev=bb_std_dev
+    )
+    df["bb_upper"] = bb_upper
+    df["bb_middle"] = bb_middle
+    df["bb_lower"] = bb_lower
+
+    # Volume ratio
+    if "volume" in df.columns:
+        df["volume_ratio"] = calculate_volume_ratio(df["volume"], period=volume_avg_period)
+    else:
+        df["volume_ratio"] = 1.0
+
+    # VWAP - already from Alpaca API, but add fallback
+    if "vwap" not in df.columns:
+        # Fallback: typical price approximation
+        df["vwap"] = (df["high"] + df["low"] + df["close"]) / 3
 
     return df

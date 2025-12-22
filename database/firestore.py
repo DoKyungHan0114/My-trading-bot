@@ -77,6 +77,7 @@ class FirestoreClient:
             "strategy_id": strategy_id,
             "parent_id": parent_id,
             "parameters": {
+                # Core parameters
                 "symbol": config.symbol,
                 "rsi_period": config.rsi_period,
                 "rsi_oversold": config.rsi_oversold,
@@ -85,6 +86,21 @@ class FirestoreClient:
                 "stop_loss_pct": config.stop_loss_pct,
                 "position_size_pct": config.position_size_pct,
                 "cash_reserve_pct": config.cash_reserve_pct,
+                # VWAP Filter
+                "vwap_filter_enabled": config.vwap_filter_enabled,
+                "vwap_entry_below": config.vwap_entry_below,
+                # ATR Dynamic Stop Loss
+                "atr_stop_enabled": config.atr_stop_enabled,
+                "atr_stop_multiplier": config.atr_stop_multiplier,
+                "atr_period": config.atr_period,
+                # Bollinger Bands Filter
+                "bb_filter_enabled": config.bb_filter_enabled,
+                "bb_period": config.bb_period,
+                "bb_std_dev": config.bb_std_dev,
+                # Volume Filter
+                "volume_filter_enabled": config.volume_filter_enabled,
+                "volume_min_ratio": config.volume_min_ratio,
+                "volume_avg_period": config.volume_avg_period,
             },
             "created_at": datetime.utcnow(),
             "created_by": created_by,
@@ -451,17 +467,33 @@ class FirestoreClient:
     # =========================================================================
 
     def strategy_to_config(self, strategy: dict) -> StrategyConfig:
-        """Convert strategy document to StrategyConfig."""
+        """Convert strategy document to StrategyConfig with all parameters."""
         params = strategy.get("parameters", {})
         return StrategyConfig(
+            # Core parameters
             symbol=params.get("symbol", "TQQQ"),
             rsi_period=params.get("rsi_period", 2),
-            rsi_oversold=params.get("rsi_oversold", 10.0),
-            rsi_overbought=params.get("rsi_overbought", 70.0),
-            sma_period=params.get("sma_period", 200),
+            rsi_oversold=params.get("rsi_oversold", 30.0),
+            rsi_overbought=params.get("rsi_overbought", 75.0),
+            sma_period=params.get("sma_period", 20),
             stop_loss_pct=params.get("stop_loss_pct", 0.05),
             position_size_pct=params.get("position_size_pct", 0.90),
             cash_reserve_pct=params.get("cash_reserve_pct", 0.10),
+            # VWAP Filter (default enabled)
+            vwap_filter_enabled=params.get("vwap_filter_enabled", True),
+            vwap_entry_below=params.get("vwap_entry_below", True),
+            # ATR Dynamic Stop Loss (default disabled)
+            atr_stop_enabled=params.get("atr_stop_enabled", False),
+            atr_stop_multiplier=params.get("atr_stop_multiplier", 2.0),
+            atr_period=params.get("atr_period", 14),
+            # Bollinger Bands Filter (default disabled)
+            bb_filter_enabled=params.get("bb_filter_enabled", False),
+            bb_period=params.get("bb_period", 20),
+            bb_std_dev=params.get("bb_std_dev", 2.0),
+            # Volume Filter (default disabled)
+            volume_filter_enabled=params.get("volume_filter_enabled", False),
+            volume_min_ratio=params.get("volume_min_ratio", 1.0),
+            volume_avg_period=params.get("volume_avg_period", 20),
         )
 
     def health_check(self) -> bool:

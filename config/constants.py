@@ -55,6 +55,25 @@ STOP_LOSS_PCT: Final[float] = 0.05  # 5%
 CASH_RESERVE_PCT: Final[float] = 0.10  # 10% cash reserve
 POSITION_SIZE_PCT: Final[float] = 0.90  # 90% of account
 
+# VWAP Filter
+VWAP_FILTER_ENABLED: Final[bool] = True  # VWAP 필터 사용
+VWAP_ENTRY_BELOW: Final[bool] = True  # VWAP 아래에서만 매수
+
+# ATR Dynamic Stop Loss
+ATR_STOP_ENABLED: Final[bool] = False  # ATR 기반 손절 (기본 비활성)
+ATR_STOP_MULTIPLIER: Final[float] = 2.0  # 손절 = 진입가 - (ATR * multiplier)
+ATR_PERIOD: Final[int] = 14  # ATR 계산 기간
+
+# Bollinger Bands Filter
+BB_FILTER_ENABLED: Final[bool] = False  # 볼린저밴드 필터 (기본 비활성)
+BB_PERIOD: Final[int] = 20
+BB_STD_DEV: Final[float] = 2.0
+
+# Volume Filter
+VOLUME_FILTER_ENABLED: Final[bool] = False  # 거래량 필터 (기본 비활성)
+VOLUME_MIN_RATIO: Final[float] = 1.0  # 20일 평균 대비 최소 비율
+VOLUME_AVG_PERIOD: Final[int] = 20
+
 # Time Constants
 US_MARKET_OPEN_HOUR: Final[int] = 9
 US_MARKET_OPEN_MINUTE: Final[int] = 30

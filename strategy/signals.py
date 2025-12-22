@@ -40,7 +40,7 @@ class Signal:
 
 
 class SignalGenerator:
-    """Generate trading signals based on RSI(2) strategy."""
+    """Generate trading signals based on RSI(2) strategy with multi-indicator filters."""
 
     def __init__(
         self,
@@ -48,26 +48,57 @@ class SignalGenerator:
         rsi_oversold: Optional[float] = None,
         rsi_overbought: Optional[float] = None,
         sma_period: Optional[int] = None,
+        # VWAP Filter
+        vwap_filter_enabled: Optional[bool] = None,
+        vwap_entry_below: Optional[bool] = None,
+        # Bollinger Bands Filter
+        bb_filter_enabled: Optional[bool] = None,
+        bb_period: Optional[int] = None,
+        bb_std_dev: Optional[float] = None,
+        # Volume Filter
+        volume_filter_enabled: Optional[bool] = None,
+        volume_min_ratio: Optional[float] = None,
+        volume_avg_period: Optional[int] = None,
     ):
         """
-        Initialize signal generator.
+        Initialize signal generator with multi-indicator support.
 
         Args:
             rsi_period: RSI calculation period
             rsi_oversold: RSI oversold threshold (entry)
             rsi_overbought: RSI overbought threshold (exit)
             sma_period: SMA period for trend filter
+            vwap_filter_enabled: Enable VWAP filter
+            vwap_entry_below: Enter only below VWAP
+            bb_filter_enabled: Enable Bollinger Bands filter
+            bb_period: Bollinger Bands period
+            bb_std_dev: Bollinger Bands standard deviation
+            volume_filter_enabled: Enable volume filter
+            volume_min_ratio: Minimum volume ratio vs average
+            volume_avg_period: Volume average period
         """
         settings = get_settings()
+        # Core parameters
         self.rsi_period = rsi_period or settings.strategy.rsi_period
         self.rsi_oversold = rsi_oversold or settings.strategy.rsi_oversold
         self.rsi_overbought = rsi_overbought or settings.strategy.rsi_overbought
         self.sma_period = sma_period or settings.strategy.sma_period
         self.symbol = settings.strategy.symbol
+        # VWAP Filter
+        self.vwap_filter_enabled = vwap_filter_enabled if vwap_filter_enabled is not None else settings.strategy.vwap_filter_enabled
+        self.vwap_entry_below = vwap_entry_below if vwap_entry_below is not None else settings.strategy.vwap_entry_below
+        # Bollinger Bands Filter
+        self.bb_filter_enabled = bb_filter_enabled if bb_filter_enabled is not None else settings.strategy.bb_filter_enabled
+        self.bb_period = bb_period or settings.strategy.bb_period
+        self.bb_std_dev = bb_std_dev or settings.strategy.bb_std_dev
+        # Volume Filter
+        self.volume_filter_enabled = volume_filter_enabled if volume_filter_enabled is not None else settings.strategy.volume_filter_enabled
+        self.volume_min_ratio = volume_min_ratio or settings.strategy.volume_min_ratio
+        self.volume_avg_period = volume_avg_period or settings.strategy.volume_avg_period
 
     def prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Prepare data with required indicators.
+        Prepare data with all required indicators.
 
         Args:
             df: Raw OHLCV DataFrame
@@ -79,6 +110,9 @@ class SignalGenerator:
             df,
             rsi_period=self.rsi_period,
             sma_period=self.sma_period,
+            bb_period=self.bb_period,
+            bb_std_dev=self.bb_std_dev,
+            volume_avg_period=self.volume_avg_period,
         )
 
     def generate_entry_signal(
@@ -87,12 +121,13 @@ class SignalGenerator:
         has_position: bool = False,
     ) -> Optional[Signal]:
         """
-        Check for entry (buy) signal.
+        Check for entry (buy) signal with multi-indicator filtering.
 
         Entry conditions:
-        1. Price above 200 SMA (uptrend)
-        2. RSI(2) <= 10 (oversold)
-        3. No current position
+        1. RSI(2) <= oversold threshold (required)
+        2. If VWAP filter enabled: price below/above VWAP
+        3. If BB filter enabled: price at or below lower band
+        4. If Volume filter enabled: volume ratio >= threshold
 
         Args:
             df: DataFrame with indicators (must call prepare_data first)
@@ -104,7 +139,8 @@ class SignalGenerator:
         if has_position:
             return None
 
-        if len(df) < self.sma_period:
+        min_period = max(self.sma_period, self.bb_period, self.volume_avg_period)
+        if len(df) < min_period:
             return None
 
         latest = df.iloc[-1]
@@ -117,31 +153,59 @@ class SignalGenerator:
         if sma_col not in df.columns or pd.isna(latest[sma_col]):
             return None
 
-        # Entry conditions (RSI only - SMA filter disabled for short-term mean reversion)
-        rsi_oversold = latest["rsi"] <= self.rsi_oversold
+        # Required: RSI oversold
+        if latest["rsi"] > self.rsi_oversold:
+            return None
 
-        if rsi_oversold:
-            # Calculate signal strength based on how oversold
-            strength = min(1.0, (self.rsi_oversold - latest["rsi"]) / self.rsi_oversold + 0.5)
+        # Track filter status for reason string
+        filters_passed = []
 
-            reason = (
-                f"RSI({self.rsi_period})={latest['rsi']:.1f} <= {self.rsi_oversold}, "
-                f"Price ${latest['close']:.2f}"
-            )
+        # VWAP Filter
+        if self.vwap_filter_enabled:
+            if "vwap" in df.columns and pd.notna(latest.get("vwap")):
+                if self.vwap_entry_below:
+                    if latest["close"] >= latest["vwap"]:
+                        return None  # Price must be below VWAP
+                    filters_passed.append(f"VWAP(below ${latest['vwap']:.2f})")
+                else:
+                    if latest["close"] <= latest["vwap"]:
+                        return None  # Price must be above VWAP
+                    filters_passed.append(f"VWAP(above ${latest['vwap']:.2f})")
 
-            logger.info(f"BUY signal generated: {reason}")
+        # Bollinger Bands Filter
+        if self.bb_filter_enabled:
+            if "bb_lower" in df.columns and pd.notna(latest.get("bb_lower")):
+                if latest["close"] > latest["bb_lower"]:
+                    return None  # Price must be at or below lower band
+                filters_passed.append(f"BB(lower ${latest['bb_lower']:.2f})")
 
-            return Signal(
-                timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
-                signal_type=SignalType.BUY,
-                symbol=self.symbol,
-                price=latest["close"],
-                rsi=latest["rsi"],
-                reason=reason,
-                strength=strength,
-            )
+        # Volume Filter
+        if self.volume_filter_enabled:
+            if "volume_ratio" in df.columns and pd.notna(latest.get("volume_ratio")):
+                if latest["volume_ratio"] < self.volume_min_ratio:
+                    return None  # Volume too low
+                filters_passed.append(f"Vol({latest['volume_ratio']:.1f}x)")
 
-        return None
+        # All filters passed - generate signal
+        strength = min(1.0, (self.rsi_oversold - latest["rsi"]) / self.rsi_oversold + 0.5)
+
+        filter_str = ", ".join(filters_passed) if filters_passed else "RSI only"
+        reason = (
+            f"RSI({self.rsi_period})={latest['rsi']:.1f} <= {self.rsi_oversold}, "
+            f"Price ${latest['close']:.2f}, Filters: [{filter_str}]"
+        )
+
+        logger.info(f"BUY signal generated: {reason}")
+
+        return Signal(
+            timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
+            signal_type=SignalType.BUY,
+            symbol=self.symbol,
+            price=latest["close"],
+            rsi=latest["rsi"],
+            reason=reason,
+            strength=strength,
+        )
 
     def generate_exit_signal(
         self,

@@ -19,6 +19,7 @@ import pytz
 
 from automation.claude_analyzer import ClaudeAnalyzer, AnalysisResult
 from database.firestore import FirestoreClient
+from notifications.discord import DiscordNotifier
 from reports.report_generator import ReportGenerator
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class AutomationScheduler:
             firestore_client=firestore_client,
             report_generator=self.report_gen,
         )
+        self.discord = DiscordNotifier()
         self._running = False
         self._last_run: Optional[datetime] = None
 
@@ -247,6 +249,15 @@ class AutomationScheduler:
         logger.info(f"Auto-apply: {self.config.auto_apply}")
         logger.info(f"Min confidence: {self.config.min_confidence:.0%}")
 
+        # Discord start notification
+        if self.discord.enabled:
+            times_str = ", ".join([f"{h}:{m:02d} ET" for h, m in self.config.analysis_times])
+            self.discord.send_message(
+                f"**Claude Strategy Scheduler Started**\n"
+                f"Analysis times: {times_str}\n"
+                f"Auto-apply: {'Yes' if self.config.auto_apply else 'No'}"
+            )
+
         while self._running:
             now = datetime.now(ET)
             next_run = self.get_next_run_time(now)
@@ -283,6 +294,10 @@ class AutomationScheduler:
             time.sleep(60)
 
         logger.info("Scheduler stopped")
+
+        # Discord stop notification
+        if self.discord.enabled:
+            self.discord.send_message("**Claude Strategy Scheduler Stopped**")
 
     def stop(self):
         """Stop the scheduling loop."""

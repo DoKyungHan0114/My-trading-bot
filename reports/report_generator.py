@@ -31,6 +31,12 @@ class MarketCondition:
     volatility_atr: float
     volume_ratio: float  # vs 20-day average
     trend: str  # "bullish", "bearish", "neutral"
+    # New indicator values
+    vwap: float = 0.0
+    price_vs_vwap_pct: float = 0.0  # % above/below VWAP
+    bb_upper: float = 0.0
+    bb_lower: float = 0.0
+    bb_position: str = "middle"  # "above_upper", "middle", "below_lower"
 
 
 @dataclass
@@ -121,6 +127,9 @@ class ReportGenerator:
                 df,
                 rsi_period=self.config.rsi_period,
                 sma_period=self.config.sma_period,
+                bb_period=self.config.bb_period,
+                bb_std_dev=self.config.bb_std_dev,
+                volume_avg_period=self.config.volume_avg_period,
             )
 
             latest = df.iloc[-1]
@@ -142,6 +151,20 @@ class ReportGenerator:
             avg_volume = df["volume"].tail(20).mean()
             volume_ratio = float(latest["volume"]) / avg_volume if avg_volume > 0 else 1.0
 
+            # VWAP
+            vwap = float(latest["vwap"]) if "vwap" in df.columns and pd.notna(latest.get("vwap")) else current_price
+            price_vs_vwap_pct = ((current_price - vwap) / vwap * 100) if vwap > 0 else 0.0
+
+            # Bollinger Bands
+            bb_upper = float(latest["bb_upper"]) if "bb_upper" in df.columns and pd.notna(latest.get("bb_upper")) else 0.0
+            bb_lower = float(latest["bb_lower"]) if "bb_lower" in df.columns and pd.notna(latest.get("bb_lower")) else 0.0
+            if current_price >= bb_upper:
+                bb_position = "above_upper"
+            elif current_price <= bb_lower:
+                bb_position = "below_lower"
+            else:
+                bb_position = "middle"
+
             # Determine trend
             if current_price > sma_value and rsi > 50:
                 trend = "bullish"
@@ -160,6 +183,11 @@ class ReportGenerator:
                 volatility_atr=atr,
                 volume_ratio=volume_ratio,
                 trend=trend,
+                vwap=vwap,
+                price_vs_vwap_pct=price_vs_vwap_pct,
+                bb_upper=bb_upper,
+                bb_lower=bb_lower,
+                bb_position=bb_position,
             )
 
         except Exception as e:
@@ -389,8 +417,9 @@ class ReportGenerator:
         performance = self.calculate_recent_performance(trades_file)
         context = self.generate_recommendations_context(market, performance)
 
-        # Build strategy dict
+        # Build strategy dict with all parameters
         strategy_dict = {
+            # Core parameters
             "symbol": self.config.symbol,
             "rsi_period": self.config.rsi_period,
             "rsi_oversold": self.config.rsi_oversold,
@@ -399,6 +428,21 @@ class ReportGenerator:
             "stop_loss_pct": self.config.stop_loss_pct,
             "position_size_pct": self.config.position_size_pct,
             "cash_reserve_pct": self.config.cash_reserve_pct,
+            # VWAP Filter
+            "vwap_filter_enabled": self.config.vwap_filter_enabled,
+            "vwap_entry_below": self.config.vwap_entry_below,
+            # ATR Dynamic Stop Loss
+            "atr_stop_enabled": self.config.atr_stop_enabled,
+            "atr_stop_multiplier": self.config.atr_stop_multiplier,
+            "atr_period": self.config.atr_period,
+            # Bollinger Bands Filter
+            "bb_filter_enabled": self.config.bb_filter_enabled,
+            "bb_period": self.config.bb_period,
+            "bb_std_dev": self.config.bb_std_dev,
+            # Volume Filter
+            "volume_filter_enabled": self.config.volume_filter_enabled,
+            "volume_min_ratio": self.config.volume_min_ratio,
+            "volume_avg_period": self.config.volume_avg_period,
         }
 
         report = AnalysisReport(

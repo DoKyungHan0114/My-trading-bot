@@ -20,7 +20,7 @@ class PositionSize:
 
 
 class RiskManager:
-    """Manage position sizing and risk controls."""
+    """Manage position sizing and risk controls with ATR-based stop loss support."""
 
     def __init__(
         self,
@@ -28,6 +28,8 @@ class RiskManager:
         cash_reserve_pct: Optional[float] = None,
         stop_loss_pct: Optional[float] = None,
         max_position_value: Optional[float] = None,
+        atr_stop_enabled: Optional[bool] = None,
+        atr_stop_multiplier: Optional[float] = None,
     ):
         """
         Initialize risk manager.
@@ -35,14 +37,19 @@ class RiskManager:
         Args:
             position_size_pct: Percentage of account for positions
             cash_reserve_pct: Percentage to keep as cash reserve
-            stop_loss_pct: Stop loss percentage
+            stop_loss_pct: Stop loss percentage (fixed)
             max_position_value: Maximum position value (optional cap)
+            atr_stop_enabled: Use ATR-based stop loss instead of fixed %
+            atr_stop_multiplier: ATR multiplier for stop distance
         """
         settings = get_settings()
         self.position_size_pct = position_size_pct or settings.strategy.position_size_pct
         self.cash_reserve_pct = cash_reserve_pct or settings.strategy.cash_reserve_pct
         self.stop_loss_pct = stop_loss_pct or settings.strategy.stop_loss_pct
         self.max_position_value = max_position_value
+        # ATR-based stop loss
+        self.atr_stop_enabled = atr_stop_enabled if atr_stop_enabled is not None else settings.strategy.atr_stop_enabled
+        self.atr_stop_multiplier = atr_stop_multiplier or settings.strategy.atr_stop_multiplier
 
     def calculate_position_size(
         self,
@@ -127,45 +134,61 @@ class RiskManager:
         self,
         entry_price: float,
         side: str = "long",
+        current_atr: Optional[float] = None,
     ) -> float:
         """
-        Calculate stop loss price.
+        Calculate stop loss price (fixed % or ATR-based).
 
         Args:
             entry_price: Entry price
             side: Position side (long/short)
+            current_atr: Current ATR value (required if ATR stop enabled)
 
         Returns:
             Stop loss price
         """
-        if side.lower() == "long":
-            return entry_price * (1 - self.stop_loss_pct)
+        if self.atr_stop_enabled and current_atr is not None:
+            # ATR-based stop loss
+            stop_distance = current_atr * self.atr_stop_multiplier
+            if side.lower() == "long":
+                return entry_price - stop_distance
+            else:
+                return entry_price + stop_distance
         else:
-            return entry_price * (1 + self.stop_loss_pct)
+            # Fixed percentage stop loss
+            if side.lower() == "long":
+                return entry_price * (1 - self.stop_loss_pct)
+            else:
+                return entry_price * (1 + self.stop_loss_pct)
 
     def check_stop_loss(
         self,
         current_price: float,
         entry_price: float,
         side: str = "long",
+        current_atr: Optional[float] = None,
     ) -> tuple[bool, float]:
         """
         Check if stop loss is triggered.
+        Supports both fixed % and ATR-based stop loss.
 
         Args:
             current_price: Current market price
             entry_price: Entry price
             side: Position side
+            current_atr: Current ATR value (for ATR-based stop)
 
         Returns:
-            Tuple of (is_triggered, loss_percentage)
+            Tuple of (is_triggered, pnl_percentage)
         """
+        stop_price = self.calculate_stop_loss_price(entry_price, side, current_atr)
+
         if side.lower() == "long":
             pnl_pct = (current_price - entry_price) / entry_price
-            triggered = pnl_pct <= -self.stop_loss_pct
+            triggered = current_price <= stop_price
         else:
             pnl_pct = (entry_price - current_price) / entry_price
-            triggered = pnl_pct <= -self.stop_loss_pct
+            triggered = current_price >= stop_price
 
         return triggered, pnl_pct
 

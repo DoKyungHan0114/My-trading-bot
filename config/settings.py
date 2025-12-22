@@ -10,7 +10,13 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from config.constants import (
+    ATR_PERIOD,
+    ATR_STOP_ENABLED,
+    ATR_STOP_MULTIPLIER,
     BACKTEST_DAYS,
+    BB_FILTER_ENABLED,
+    BB_PERIOD,
+    BB_STD_DEV,
     CASH_RESERVE_PCT,
     INITIAL_CAPITAL,
     POSITION_SIZE_PCT,
@@ -20,6 +26,11 @@ from config.constants import (
     SMA_PERIOD,
     STOP_LOSS_PCT,
     SYMBOL,
+    VOLUME_AVG_PERIOD,
+    VOLUME_FILTER_ENABLED,
+    VOLUME_MIN_RATIO,
+    VWAP_ENTRY_BELOW,
+    VWAP_FILTER_ENABLED,
     TradingMode,
 )
 
@@ -62,7 +73,8 @@ class AlpacaConfig:
 
 @dataclass
 class StrategyConfig:
-    """RSI(2) strategy configuration."""
+    """RSI(2) strategy configuration with multi-indicator support."""
+    # Core parameters
     symbol: str = SYMBOL
     rsi_period: int = RSI_PERIOD
     rsi_oversold: float = RSI_OVERSOLD
@@ -71,6 +83,21 @@ class StrategyConfig:
     stop_loss_pct: float = STOP_LOSS_PCT
     position_size_pct: float = POSITION_SIZE_PCT
     cash_reserve_pct: float = CASH_RESERVE_PCT
+    # VWAP Filter
+    vwap_filter_enabled: bool = VWAP_FILTER_ENABLED
+    vwap_entry_below: bool = VWAP_ENTRY_BELOW
+    # ATR Dynamic Stop Loss
+    atr_stop_enabled: bool = ATR_STOP_ENABLED
+    atr_stop_multiplier: float = ATR_STOP_MULTIPLIER
+    atr_period: int = ATR_PERIOD
+    # Bollinger Bands Filter
+    bb_filter_enabled: bool = BB_FILTER_ENABLED
+    bb_period: int = BB_PERIOD
+    bb_std_dev: float = BB_STD_DEV
+    # Volume Filter
+    volume_filter_enabled: bool = VOLUME_FILTER_ENABLED
+    volume_min_ratio: float = VOLUME_MIN_RATIO
+    volume_avg_period: int = VOLUME_AVG_PERIOD
 
 
 @dataclass

@@ -15,6 +15,11 @@ import requests
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from automation.bot_analytics import (
+    calculate_weekly_uptime,
+    analyze_no_trade_reason,
+    format_uptime_for_discord,
+)
 from config.settings import get_settings
 from execution.broker import AlpacaBroker
 
@@ -95,6 +100,8 @@ def create_weekly_embed(
     equity: float,
     stats: dict,
     position: dict | None,
+    weekly_uptime: list = None,
+    daily_reasons: list = None,
 ) -> dict:
     """Create Discord embed for weekly report."""
 
@@ -177,6 +184,44 @@ def create_weekly_embed(
         },
     }
 
+    # Add weekly uptime summary
+    if weekly_uptime:
+        total_market_mins = sum(u.market_minutes for u in weekly_uptime)
+        total_running_mins = sum(u.bot_running_minutes for u in weekly_uptime)
+        weekly_uptime_pct = (total_running_mins / total_market_mins * 100) if total_market_mins > 0 else 0
+
+        uptime_emoji = "🟢" if weekly_uptime_pct >= 95 else "🟡" if weekly_uptime_pct >= 80 else "🔴"
+        total_hours = total_running_mins // 60
+        total_mins = total_running_mins % 60
+
+        uptime_lines = [f"{uptime_emoji} **Weekly: {weekly_uptime_pct:.1f}%** ({total_hours}h {total_mins}m)"]
+        for u in weekly_uptime:
+            uptime_lines.append(format_uptime_for_discord(u))
+
+        embed["fields"].append({
+            "name": "🤖 Bot Uptime",
+            "value": "\n".join(uptime_lines),
+            "inline": False,
+        })
+
+    # Add no-trade day analysis
+    if daily_reasons:
+        no_trade_days = [r for r in daily_reasons if r.primary_reason != "Trades occurred" and r.market_condition != "closed"]
+        if no_trade_days:
+            reason_lines = []
+            for reason in no_trade_days[:5]:  # Max 5 days
+                if reason.rsi_value is not None:
+                    reason_lines.append(f"• RSI={reason.rsi_value:.1f} ({reason.market_condition})")
+                else:
+                    reason_lines.append(f"• {reason.primary_reason[:50]}")
+
+            if reason_lines:
+                embed["fields"].append({
+                    "name": f"❓ No-Trade Days ({len(no_trade_days)})",
+                    "value": "\n".join(reason_lines),
+                    "inline": False,
+                })
+
     return embed
 
 
@@ -207,12 +252,31 @@ def send_weekly_report():
         trades = get_weeks_trades()
         stats = calculate_weekly_stats(trades)
 
+        # Get weekly uptime stats
+        weekly_uptime = calculate_weekly_uptime()
+        if weekly_uptime:
+            avg_uptime = sum(u.uptime_pct for u in weekly_uptime) / len(weekly_uptime)
+            logger.info(f"Weekly avg uptime: {avg_uptime:.1f}%")
+
+        # Get no-trade reasons for each day
+        daily_reasons = []
+        now_et = datetime.now(ET)
+        days_since_monday = now_et.weekday()
+        monday = now_et - timedelta(days=days_since_monday)
+
+        for i in range(min(5, days_since_monday + 1)):  # Mon-Fri up to today
+            day = monday + timedelta(days=i)
+            reason = analyze_no_trade_reason(date=day.strftime("%Y-%m-%d"))
+            daily_reasons.append(reason)
+
         # Create embed
         embed = create_weekly_embed(
             week_range=week_range,
             equity=equity,
             stats=stats,
             position=position,
+            weekly_uptime=weekly_uptime,
+            daily_reasons=daily_reasons,
         )
 
         # Send to Discord

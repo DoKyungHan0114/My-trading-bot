@@ -16,6 +16,12 @@ import requests
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from automation.bot_analytics import (
+    calculate_daily_uptime,
+    analyze_no_trade_reason,
+    format_uptime_for_discord,
+    format_no_trade_for_discord,
+)
 from config.settings import get_settings
 from execution.broker import AlpacaBroker
 
@@ -75,6 +81,8 @@ def create_daily_embed(
     wins: int,
     losses: int,
     position: dict | None,
+    uptime_stats=None,
+    no_trade_reason=None,
 ) -> dict:
     """Create Discord embed for daily report."""
 
@@ -156,6 +164,31 @@ def create_daily_embed(
             "inline": False,
         })
 
+    # Add bot uptime info
+    if uptime_stats:
+        uptime_emoji = "🟢" if uptime_stats.uptime_pct >= 95 else "🟡" if uptime_stats.uptime_pct >= 80 else "🔴"
+        hours = uptime_stats.bot_running_minutes // 60
+        mins = uptime_stats.bot_running_minutes % 60
+
+        uptime_text = f"{uptime_emoji} **{uptime_stats.uptime_pct:.1f}%** ({hours}h {mins}m / 6.5h)"
+        if uptime_stats.errors:
+            uptime_text += f"\n⚠️ {len(uptime_stats.errors)} error(s)"
+
+        embed["fields"].append({
+            "name": "🤖 Bot Uptime",
+            "value": uptime_text,
+            "inline": True,
+        })
+
+    # Add no-trade reason if no trades today
+    if not trades and no_trade_reason:
+        reason_text = format_no_trade_for_discord(no_trade_reason)
+        embed["fields"].append({
+            "name": "❓ Why No Trades?",
+            "value": reason_text,
+            "inline": False,
+        })
+
     return embed
 
 
@@ -171,6 +204,7 @@ def send_daily_report():
     # Get current date in ET
     now_et = datetime.now(ET)
     date_str = now_et.strftime("%Y-%m-%d (%a)")
+    date_iso = now_et.strftime("%Y-%m-%d")
 
     logger.info(f"Generating daily report for {date_str}")
 
@@ -191,6 +225,16 @@ def send_daily_report():
         # This is simplified - ideally track starting equity
         daily_pnl_pct = (daily_pnl / equity * 100) if equity > 0 else 0
 
+        # Get bot uptime stats
+        uptime_stats = calculate_daily_uptime(date=date_iso)
+        logger.info(f"Bot uptime: {uptime_stats.uptime_pct:.1f}%")
+
+        # Get no-trade reason if no trades
+        no_trade_reason = None
+        if not trades:
+            no_trade_reason = analyze_no_trade_reason(date=date_iso)
+            logger.info(f"No trade reason: {no_trade_reason.primary_reason}")
+
         # Create embed
         embed = create_daily_embed(
             date=date_str,
@@ -201,6 +245,8 @@ def send_daily_report():
             wins=wins,
             losses=losses,
             position=position,
+            uptime_stats=uptime_stats,
+            no_trade_reason=no_trade_reason,
         )
 
         # Send to Discord
