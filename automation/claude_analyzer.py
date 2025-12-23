@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import StrategyConfig, get_settings
 from database.firestore import FirestoreClient
 from reports.report_generator import AnalysisReport, ReportGenerator
+from strategy.rag_retriever import RAGRetriever
+from strategy.regime import RegimeClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,9 @@ Be bold and proactive in suggesting optimizations. Your job is to maximize retur
 
 ## Context
 {context}
+
+## Historical RAG Analysis
+{rag_context}
 
 ## Your Task
 Actively optimize the strategy for better performance. Don't be afraid to make changes.
@@ -165,6 +170,15 @@ Respond in this exact JSON format:
         self.firestore = firestore_client
         self.report_gen = report_generator or ReportGenerator()
         self.claude_path = os.getenv("CLAUDE_CLI_PATH", "claude")
+        # Initialize RAG components
+        try:
+            self.rag_retriever = RAGRetriever()
+            self.regime_classifier = RegimeClassifier()
+            logger.info("RAG retriever initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize RAG: {e}")
+            self.rag_retriever = None
+            self.regime_classifier = None
 
     def build_prompt(self, report: AnalysisReport) -> str:
         """
@@ -176,13 +190,56 @@ Respond in this exact JSON format:
         Returns:
             Formatted prompt string
         """
+        # Get RAG context if available
+        rag_context = self._get_rag_context(report)
+
         return self.ANALYSIS_PROMPT_TEMPLATE.format(
             strategy_json=json.dumps(report.strategy, indent=2),
             market_json=json.dumps(report.market_condition, indent=2),
             trades_json=json.dumps(report.todays_trades, indent=2),
             performance_json=json.dumps(report.recent_performance, indent=2),
             context=report.recommendations_context,
+            rag_context=rag_context,
         )
+
+    def _get_rag_context(self, report: AnalysisReport) -> str:
+        """
+        Get RAG context based on current market conditions.
+
+        Args:
+            report: Analysis report with market data
+
+        Returns:
+            Formatted RAG context string
+        """
+        if not self.rag_retriever or not self.regime_classifier:
+            return "(RAG not available - no historical context)"
+
+        try:
+            # Get current market condition from report or classify fresh
+            from datetime import datetime, timedelta
+
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+            condition = self.regime_classifier.classify("TQQQ", start_date, end_date)
+
+            if not condition:
+                return "(Unable to classify current market conditions)"
+
+            # Get RAG context
+            context = self.rag_retriever.get_rag_context(
+                current_condition_text=condition.to_embedding_text(),
+                current_regime=condition.regime.value,
+                current_volatility=condition.volatility.value,
+            )
+
+            logger.info(f"RAG context: Current regime is {condition.regime.value}")
+            return context
+
+        except Exception as e:
+            logger.warning(f"Failed to get RAG context: {e}")
+            return f"(RAG error: {e})"
 
     def call_claude(self, prompt: str, timeout: int = 120) -> Optional[str]:
         """
@@ -479,8 +536,12 @@ Respond in this exact JSON format:
             if self.firestore:
                 last_change = self.firestore.get_last_strategy_change_time()
                 if last_change:
-                    from datetime import timedelta
-                    days_since_change = (datetime.now() - last_change).days
+                    from datetime import timedelta, timezone
+                    now = datetime.now(timezone.utc)
+                    # Make last_change timezone-aware if needed
+                    if last_change.tzinfo is None:
+                        last_change = last_change.replace(tzinfo=timezone.utc)
+                    days_since_change = (now - last_change).days
                     if days_since_change < cooldown_days:
                         logger.info(
                             f"Cooldown active: {days_since_change} days since last change, "
@@ -490,10 +551,8 @@ Respond in this exact JSON format:
 
         # Auto-apply if enabled and confident
         if auto_apply and result.modifications and result.confidence >= min_confidence:
-            # Limit to single modification to prevent oscillation
-            if len(result.modifications) > 1:
-                logger.info("Multiple modifications suggested, applying only the first one")
-                result.modifications = [result.modifications[0]]
+            # Apply ALL modifications (aggressive mode)
+            logger.info(f"Applying {len(result.modifications)} modifications...")
 
             settings = get_settings()
             old_config = settings.strategy
@@ -517,12 +576,13 @@ Respond in this exact JSON format:
         return result
 
 
-def run_analysis(auto_apply: bool = False) -> Optional[AnalysisResult]:
+def run_analysis(auto_apply: bool = False, skip_cooldown: bool = False) -> Optional[AnalysisResult]:
     """
     Convenience function to run analysis.
 
     Args:
         auto_apply: Whether to auto-apply modifications
+        skip_cooldown: Whether to skip cooldown period
 
     Returns:
         Analysis result
@@ -534,7 +594,8 @@ def run_analysis(auto_apply: bool = False) -> Optional[AnalysisResult]:
         logger.warning("Firestore not available, running without DB")
 
     analyzer = ClaudeAnalyzer(firestore_client=firestore)
-    return analyzer.analyze(auto_apply=auto_apply)
+    cooldown = 0 if skip_cooldown else 3
+    return analyzer.analyze(auto_apply=auto_apply, cooldown_days=cooldown)
 
 
 if __name__ == "__main__":
@@ -543,7 +604,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     auto = "--auto" in sys.argv
-    result = run_analysis(auto_apply=auto)
+    no_cooldown = "--no-cooldown" in sys.argv
+    result = run_analysis(auto_apply=auto, skip_cooldown=no_cooldown)
 
     if result:
         print(f"\n=== Analysis Result ===")

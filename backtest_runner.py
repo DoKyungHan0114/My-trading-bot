@@ -175,6 +175,18 @@ def run_backtest(
                     firestore.activate_strategy(strategy_id)
                     logger.info(f"Created initial strategy: {strategy_id}")
 
+                # Get market condition for this period
+                market_condition = None
+                try:
+                    from strategy.regime import RegimeClassifier
+                    classifier = RegimeClassifier()
+                    condition = classifier.classify("TQQQ", start_date, end_date)
+                    if condition:
+                        market_condition = condition.to_dict()
+                        market_condition["embedding_text"] = condition.to_embedding_text()
+                except Exception as e:
+                    logger.warning(f"Failed to classify market condition: {e}")
+
                 # Save session (backtest result)
                 session_id = firestore.create_session(
                     strategy_id=strategy_id,
@@ -184,6 +196,9 @@ def run_backtest(
                     max_drawdown=abs(result.metrics.max_drawdown),
                     sharpe_ratio=result.metrics.sharpe_ratio,
                     trade_count=result.metrics.total_trades,
+                    period_start=start_date,
+                    period_end=end_date,
+                    market_condition=market_condition,
                 )
                 logger.info(f"Session saved to Firestore: {session_id}")
 

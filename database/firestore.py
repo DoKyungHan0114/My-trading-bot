@@ -321,6 +321,9 @@ class FirestoreClient:
         max_drawdown: float,
         sharpe_ratio: float,
         trade_count: int,
+        period_start: str = None,
+        period_end: str = None,
+        market_condition: dict = None,
     ) -> str:
         """
         Create a session performance record.
@@ -333,6 +336,9 @@ class FirestoreClient:
             max_drawdown: Maximum drawdown percentage
             sharpe_ratio: Sharpe ratio
             trade_count: Number of trades
+            period_start: Backtest period start (YYYY-MM-DD)
+            period_end: Backtest period end (YYYY-MM-DD)
+            market_condition: Market regime metadata
 
         Returns:
             Session ID
@@ -349,6 +355,12 @@ class FirestoreClient:
             "trade_count": trade_count,
             "created_at": datetime.utcnow(),
         }
+        if period_start:
+            doc["period_start"] = period_start
+        if period_end:
+            doc["period_end"] = period_end
+        if market_condition:
+            doc["market_condition"] = market_condition
 
         self._collection("sessions").document(session_id).set(doc)
         logger.info(f"Created session: {session_id}")
