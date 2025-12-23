@@ -29,12 +29,17 @@ class BacktestTrade:
     exit_date: Optional[datetime] = None
     exit_price: Optional[float] = None
     quantity: float = 0.0
-    side: str = "BUY"
+    side: str = "BUY"  # BUY (long) or SHORT
     pnl: float = 0.0
     pnl_pct: float = 0.0
     holding_days: int = 0
     entry_reason: str = ""
     exit_reason: str = ""
+
+    @property
+    def is_short(self) -> bool:
+        """Check if this is a short trade."""
+        return self.side == "SHORT"
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -193,9 +198,22 @@ class BacktestEngine:
         # Start resource monitoring
         self.resource_monitor.start()
 
-        # Fetch data
+        # Fetch data for primary symbol (TQQQ)
         df = self._get_data(symbol, start_date, end_date)
         self.resource_monitor.record_data_points(len(df))
+
+        # Fetch data for inverse ETF (SQQQ) if enabled
+        hedge_df = None
+        if settings.strategy.short_enabled and settings.strategy.use_inverse_etf:
+            inverse_symbol = settings.strategy.inverse_symbol
+            logger.info(f"Fetching hedge symbol data: {inverse_symbol}")
+            try:
+                hedge_df = self._get_data(inverse_symbol, start_date, end_date)
+                self.resource_monitor.record_data_points(len(hedge_df))
+                logger.info(f"Fetched {len(hedge_df)} bars for {inverse_symbol}")
+            except Exception as e:
+                logger.warning(f"Could not fetch hedge symbol data: {e}")
+                hedge_df = None
 
         # Add indicators
         df = add_all_indicators(
@@ -208,7 +226,7 @@ class BacktestEngine:
         portfolio = Portfolio(initial_capital=self.initial_capital)
 
         # Run simulation
-        equity_curve, trades = self._simulate(df, portfolio, symbol)
+        equity_curve, trades = self._simulate(df, portfolio, symbol, hedge_df=hedge_df)
 
         # Calculate metrics
         metrics = self.metrics_calculator.calculate(
@@ -276,25 +294,31 @@ class BacktestEngine:
         df: pd.DataFrame,
         portfolio: Portfolio,
         symbol: str,
+        hedge_df: Optional[pd.DataFrame] = None,
     ) -> tuple[pd.Series, list[BacktestTrade]]:
         """
-        Run trading simulation.
+        Run trading simulation with long, short, and hedge (SQQQ) support.
 
         Args:
-            df: DataFrame with OHLCV and indicators
+            df: DataFrame with OHLCV and indicators for primary symbol (TQQQ)
             portfolio: Portfolio to trade
-            symbol: Symbol being traded
+            symbol: Primary symbol (TQQQ)
+            hedge_df: DataFrame for hedge symbol (SQQQ) if using inverse ETF
 
         Returns:
             Tuple of (equity_curve, trades)
         """
+        from config.constants import SignalType
+
         settings = get_settings()
         trades: list[BacktestTrade] = []
         equity_values = []
         dates = []
 
         current_trade: Optional[BacktestTrade] = None
-        entry_price: Optional[float] = None
+        entry_price: Optional[float] = None  # TQQQ entry price
+        hedge_entry_price: Optional[float] = None  # SQQQ entry price
+        position_side: Optional[str] = None  # "long", "short", or "hedge"
 
         # Skip first SMA_PERIOD days for indicator warmup
         warmup = settings.strategy.sma_period
@@ -307,54 +331,85 @@ class BacktestEngine:
             current_data = df.iloc[:i+1]
             current_bar = df.iloc[i]
 
+            # Get hedge symbol data if available
+            hedge_bar = None
+            if hedge_df is not None and current_date in hedge_df.index:
+                hedge_bar = hedge_df.loc[current_date]
+
             # Check for signals
             has_position = portfolio.has_position
 
             if has_position and entry_price is not None:
-                # Check for exit
-                signal = self.signal_generator.generate_exit_signal(
+                # Check for exit based on position type
+                current_hedge_price = hedge_bar["close"] if hedge_bar is not None else None
+                signal = self.signal_generator.generate_signals(
                     current_data,
+                    has_position=True,
                     entry_price=entry_price,
                     stop_loss_pct=settings.strategy.stop_loss_pct,
+                    position_side=position_side,
+                    short_stop_loss_pct=settings.strategy.short_stop_loss_pct,
+                    hedge_entry_price=hedge_entry_price,
+                    current_hedge_price=current_hedge_price,
                 )
 
-                if signal:
-                    # Execute sell
-                    position = portfolio.get_position(symbol)
-                    if position:
-                        # Apply slippage
+                exit_signal_types = (SignalType.SELL, SignalType.COVER, SignalType.HEDGE_SELL)
+                if signal and signal.signal_type in exit_signal_types:
+                    # Determine exit price based on position type
+                    if position_side == "hedge" and hedge_bar is not None:
+                        # Exit SQQQ position
+                        exit_price = hedge_bar["close"] * (1 - self.slippage_pct)
+                        position = portfolio.get_position(settings.strategy.inverse_symbol)
+                        trade_symbol = settings.strategy.inverse_symbol
+                    elif position_side == "short":
+                        exit_price = current_bar["close"] * (1 + self.slippage_pct)
+                        position = portfolio.get_position(symbol)
+                        trade_symbol = symbol
+                    else:
                         exit_price = current_bar["close"] * (1 - self.slippage_pct)
+                        position = portfolio.get_position(symbol)
+                        trade_symbol = symbol
 
+                    if position:
                         pnl = portfolio.close_position(
-                            symbol=symbol,
+                            symbol=trade_symbol,
                             price=exit_price,
                             timestamp=current_date if isinstance(current_date, datetime) else current_date.to_pydatetime(),
                             commission=self.commission,
                         )
+
+                        # For shorts, recalculate PnL
+                        if position_side == "short":
+                            pnl = (entry_price - exit_price) * current_trade.quantity - self.commission
 
                         # Complete trade record
                         if current_trade:
                             current_trade.exit_date = current_date if isinstance(current_date, datetime) else current_date.to_pydatetime()
                             current_trade.exit_price = exit_price
                             current_trade.pnl = pnl
-                            current_trade.pnl_pct = (pnl / (entry_price * current_trade.quantity)) * 100
+                            if position_side == "hedge" and hedge_entry_price:
+                                current_trade.pnl_pct = (pnl / (hedge_entry_price * current_trade.quantity)) * 100
+                            else:
+                                current_trade.pnl_pct = (pnl / (entry_price * current_trade.quantity)) * 100
                             current_trade.holding_days = (current_trade.exit_date - current_trade.entry_date).days
                             current_trade.exit_reason = signal.reason
                             trades.append(current_trade)
 
                         current_trade = None
                         entry_price = None
+                        hedge_entry_price = None
+                        position_side = None
                         self.resource_monitor.record_trade()
 
             else:
-                # Check for entry
-                signal = self.signal_generator.generate_entry_signal(
+                # Check for entry (long, short, or hedge)
+                signal = self.signal_generator.generate_signals(
                     current_data,
                     has_position=False,
                 )
 
-                if signal:
-                    # Calculate position size
+                if signal and signal.signal_type == SignalType.BUY:
+                    # Long entry (TQQQ)
                     pos_size = self.risk_manager.calculate_position_size(
                         account_value=portfolio.equity,
                         current_price=current_bar["close"],
@@ -362,7 +417,6 @@ class BacktestEngine:
                     )
 
                     if pos_size.shares > 0:
-                        # Apply slippage
                         buy_price = current_bar["close"] * (1 + self.slippage_pct)
 
                         try:
@@ -375,8 +429,8 @@ class BacktestEngine:
                             )
 
                             entry_price = buy_price
+                            position_side = "long"
 
-                            # Start trade record
                             current_trade = BacktestTrade(
                                 entry_date=current_date if isinstance(current_date, datetime) else current_date.to_pydatetime(),
                                 entry_price=buy_price,
@@ -386,11 +440,87 @@ class BacktestEngine:
                             )
 
                         except ValueError as e:
-                            logger.warning(f"Could not open position: {e}")
+                            logger.warning(f"Could not open long position: {e}")
+
+                elif signal and signal.signal_type == SignalType.HEDGE_BUY and hedge_bar is not None:
+                    # Hedge entry: Buy SQQQ instead of shorting TQQQ
+                    pos_size = self.risk_manager.calculate_position_size(
+                        account_value=portfolio.equity,
+                        current_price=hedge_bar["close"],
+                        use_fractional=True,
+                        position_size_pct=settings.strategy.short_position_size_pct,
+                    )
+
+                    if pos_size.shares > 0:
+                        buy_price = hedge_bar["close"] * (1 + self.slippage_pct)
+
+                        try:
+                            portfolio.open_position(
+                                symbol=settings.strategy.inverse_symbol,
+                                quantity=pos_size.shares,
+                                price=buy_price,
+                                timestamp=current_date if isinstance(current_date, datetime) else current_date.to_pydatetime(),
+                                commission=self.commission,
+                            )
+
+                            entry_price = current_bar["close"]  # TQQQ price for RSI tracking
+                            hedge_entry_price = buy_price  # SQQQ price for stop loss
+                            position_side = "hedge"
+
+                            current_trade = BacktestTrade(
+                                entry_date=current_date if isinstance(current_date, datetime) else current_date.to_pydatetime(),
+                                entry_price=buy_price,
+                                quantity=pos_size.shares,
+                                side="HEDGE",
+                                entry_reason=signal.reason,
+                            )
+
+                            logger.info(f"HEDGE position opened: {pos_size.shares:.2f} SQQQ @ ${buy_price:.2f}")
+
+                        except ValueError as e:
+                            logger.warning(f"Could not open hedge position: {e}")
+
+                elif signal and signal.signal_type == SignalType.SHORT:
+                    # Direct short entry (TQQQ)
+                    pos_size = self.risk_manager.calculate_position_size(
+                        account_value=portfolio.equity,
+                        current_price=current_bar["close"],
+                        use_fractional=True,
+                        position_size_pct=settings.strategy.short_position_size_pct,
+                    )
+
+                    if pos_size.shares > 0:
+                        short_price = current_bar["close"] * (1 - self.slippage_pct)
+
+                        try:
+                            portfolio.open_position(
+                                symbol=symbol,
+                                quantity=pos_size.shares,
+                                price=short_price,
+                                timestamp=current_date if isinstance(current_date, datetime) else current_date.to_pydatetime(),
+                                commission=self.commission,
+                            )
+
+                            entry_price = short_price
+                            position_side = "short"
+
+                            current_trade = BacktestTrade(
+                                entry_date=current_date if isinstance(current_date, datetime) else current_date.to_pydatetime(),
+                                entry_price=short_price,
+                                quantity=pos_size.shares,
+                                side="SHORT",
+                                entry_reason=signal.reason,
+                            )
+
+                        except ValueError as e:
+                            logger.warning(f"Could not open short position: {e}")
 
             # Update portfolio prices
             if portfolio.has_position:
-                portfolio.update_prices({symbol: current_bar["close"]})
+                if position_side == "long":
+                    portfolio.update_prices({symbol: current_bar["close"]})
+                elif position_side == "hedge" and hedge_bar is not None:
+                    portfolio.update_prices({settings.strategy.inverse_symbol: hedge_bar["close"]})
 
             # Record equity
             equity_values.append(portfolio.equity)
@@ -398,21 +528,29 @@ class BacktestEngine:
 
         # Close any remaining position at end
         if portfolio.has_position and current_trade:
-            position = portfolio.get_position(symbol)
-            if position:
+            if position_side == "hedge" and hedge_df is not None:
+                final_price = hedge_df.iloc[-1]["close"]
+                trade_symbol = settings.strategy.inverse_symbol
+                pnl = portfolio.close_position(symbol=trade_symbol, price=final_price)
+            elif position_side == "short":
                 final_price = df.iloc[-1]["close"]
-                pnl = portfolio.close_position(
-                    symbol=symbol,
-                    price=final_price,
-                )
+                trade_symbol = symbol
+                pnl = (entry_price - final_price) * current_trade.quantity - self.commission
+            else:
+                final_price = df.iloc[-1]["close"]
+                trade_symbol = symbol
+                pnl = portfolio.close_position(symbol=trade_symbol, price=final_price)
 
-                current_trade.exit_date = df.index[-1] if isinstance(df.index[-1], datetime) else df.index[-1].to_pydatetime()
-                current_trade.exit_price = final_price
-                current_trade.pnl = pnl
-                current_trade.pnl_pct = (pnl / (entry_price * current_trade.quantity)) * 100 if entry_price else 0
-                current_trade.holding_days = (current_trade.exit_date - current_trade.entry_date).days
-                current_trade.exit_reason = "End of backtest period"
-                trades.append(current_trade)
+            current_trade.exit_date = df.index[-1] if isinstance(df.index[-1], datetime) else df.index[-1].to_pydatetime()
+            current_trade.exit_price = final_price
+            current_trade.pnl = pnl
+            if position_side == "hedge" and hedge_entry_price:
+                current_trade.pnl_pct = (pnl / (hedge_entry_price * current_trade.quantity)) * 100
+            elif entry_price:
+                current_trade.pnl_pct = (pnl / (entry_price * current_trade.quantity)) * 100
+            current_trade.holding_days = (current_trade.exit_date - current_trade.entry_date).days
+            current_trade.exit_reason = "End of backtest period"
+            trades.append(current_trade)
 
         equity_curve = pd.Series(equity_values, index=dates)
         return equity_curve, trades
@@ -428,6 +566,15 @@ class BacktestEngine:
             "sma_period": settings.strategy.sma_period,
             "stop_loss_pct": settings.strategy.stop_loss_pct,
             "position_size_pct": settings.strategy.position_size_pct,
+            # Hedge/Short parameters
+            "short_enabled": settings.strategy.short_enabled,
+            "use_inverse_etf": settings.strategy.use_inverse_etf,
+            "inverse_symbol": settings.strategy.inverse_symbol,
+            "rsi_overbought_short": settings.strategy.rsi_overbought_short,
+            "rsi_oversold_short": settings.strategy.rsi_oversold_short,
+            "short_stop_loss_pct": settings.strategy.short_stop_loss_pct,
+            "short_position_size_pct": settings.strategy.short_position_size_pct,
+            # Backtest settings
             "initial_capital": self.initial_capital,
             "commission": self.commission,
             "slippage_pct": self.slippage_pct,

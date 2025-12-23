@@ -59,14 +59,18 @@ class SignalGenerator:
         volume_filter_enabled: Optional[bool] = None,
         volume_min_ratio: Optional[float] = None,
         volume_avg_period: Optional[int] = None,
+        # Short Selling
+        short_enabled: Optional[bool] = None,
+        rsi_overbought_short: Optional[float] = None,
+        rsi_oversold_short: Optional[float] = None,
     ):
         """
         Initialize signal generator with multi-indicator support.
 
         Args:
             rsi_period: RSI calculation period
-            rsi_oversold: RSI oversold threshold (entry)
-            rsi_overbought: RSI overbought threshold (exit)
+            rsi_oversold: RSI oversold threshold (long entry)
+            rsi_overbought: RSI overbought threshold (long exit)
             sma_period: SMA period for trend filter
             vwap_filter_enabled: Enable VWAP filter
             vwap_entry_below: Enter only below VWAP
@@ -76,6 +80,9 @@ class SignalGenerator:
             volume_filter_enabled: Enable volume filter
             volume_min_ratio: Minimum volume ratio vs average
             volume_avg_period: Volume average period
+            short_enabled: Enable short selling
+            rsi_overbought_short: RSI overbought threshold for short entry
+            rsi_oversold_short: RSI oversold threshold for short exit
         """
         settings = get_settings()
         # Core parameters
@@ -95,6 +102,12 @@ class SignalGenerator:
         self.volume_filter_enabled = volume_filter_enabled if volume_filter_enabled is not None else settings.strategy.volume_filter_enabled
         self.volume_min_ratio = volume_min_ratio or settings.strategy.volume_min_ratio
         self.volume_avg_period = volume_avg_period or settings.strategy.volume_avg_period
+        # Inverse/Hedge Trading (SQQQ)
+        self.short_enabled = short_enabled if short_enabled is not None else settings.strategy.short_enabled
+        self.inverse_symbol = settings.strategy.inverse_symbol
+        self.use_inverse_etf = settings.strategy.use_inverse_etf
+        self.rsi_overbought_short = rsi_overbought_short or settings.strategy.rsi_overbought_short
+        self.rsi_oversold_short = rsi_oversold_short or settings.strategy.rsi_oversold_short
 
     def prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -281,12 +294,231 @@ class SignalGenerator:
 
         return None
 
+    def generate_short_entry_signal(
+        self,
+        df: pd.DataFrame,
+        has_position: bool = False,
+    ) -> Optional[Signal]:
+        """
+        Check for hedge/short entry signal.
+
+        When use_inverse_etf=True: Buy SQQQ (inverse ETF) instead of shorting TQQQ
+        When use_inverse_etf=False: Short TQQQ directly
+
+        Entry conditions:
+        1. RSI(2) >= rsi_overbought_short (e.g., 90 - very conservative)
+        2. Price above SMA (trend is extended)
+        3. If VWAP filter enabled: price above VWAP (overextended)
+
+        Args:
+            df: DataFrame with indicators
+            has_position: Whether currently holding any position
+
+        Returns:
+            Signal if hedge/short entry conditions met, None otherwise
+        """
+        if not self.short_enabled:
+            return None
+
+        if has_position:
+            return None
+
+        min_period = max(self.sma_period, self.bb_period, self.volume_avg_period)
+        if len(df) < min_period:
+            return None
+
+        latest = df.iloc[-1]
+        timestamp = df.index[-1]
+
+        sma_col = f"sma_{self.sma_period}"
+
+        if sma_col not in df.columns or pd.isna(latest[sma_col]):
+            return None
+
+        # Required: RSI overbought for hedge
+        if latest["rsi"] < self.rsi_overbought_short:
+            return None
+
+        # Required: Price above SMA (trend is extended upward)
+        if latest["close"] <= latest[sma_col]:
+            return None
+
+        filters_passed = []
+
+        # VWAP Filter - enter when price is ABOVE VWAP (overextended)
+        if self.vwap_filter_enabled:
+            if "vwap" in df.columns and pd.notna(latest.get("vwap")):
+                if latest["close"] <= latest["vwap"]:
+                    return None
+                filters_passed.append(f"VWAP(above ${latest['vwap']:.2f})")
+
+        # Bollinger Bands Filter - price at or above upper band
+        if self.bb_filter_enabled:
+            if "bb_upper" in df.columns and pd.notna(latest.get("bb_upper")):
+                if latest["close"] < latest["bb_upper"]:
+                    return None
+                filters_passed.append(f"BB(upper ${latest['bb_upper']:.2f})")
+
+        # Volume Filter
+        if self.volume_filter_enabled:
+            if "volume_ratio" in df.columns and pd.notna(latest.get("volume_ratio")):
+                if latest["volume_ratio"] < self.volume_min_ratio:
+                    return None
+                filters_passed.append(f"Vol({latest['volume_ratio']:.1f}x)")
+
+        # Calculate signal strength
+        strength = min(1.0, (latest["rsi"] - self.rsi_overbought_short) / (100 - self.rsi_overbought_short) + 0.5)
+
+        filter_str = ", ".join(filters_passed) if filters_passed else "RSI only"
+
+        # Use HEDGE_BUY for inverse ETF, SHORT for direct shorting
+        if self.use_inverse_etf:
+            signal_type = SignalType.HEDGE_BUY
+            target_symbol = self.inverse_symbol
+            reason = (
+                f"HEDGE(SQQQ): TQQQ RSI({self.rsi_period})={latest['rsi']:.1f} >= {self.rsi_overbought_short}, "
+                f"Price ${latest['close']:.2f} > SMA ${latest[sma_col]:.2f}, Filters: [{filter_str}]"
+            )
+            logger.info(f"HEDGE_BUY signal generated: Buy {target_symbol} - {reason}")
+        else:
+            signal_type = SignalType.SHORT
+            target_symbol = self.symbol
+            reason = (
+                f"SHORT: RSI({self.rsi_period})={latest['rsi']:.1f} >= {self.rsi_overbought_short}, "
+                f"Price ${latest['close']:.2f} > SMA ${latest[sma_col]:.2f}, Filters: [{filter_str}]"
+            )
+            logger.info(f"SHORT signal generated: {reason}")
+
+        return Signal(
+            timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
+            signal_type=signal_type,
+            symbol=target_symbol,
+            price=latest["close"],
+            rsi=latest["rsi"],
+            reason=reason,
+            strength=strength,
+        )
+
+    def generate_short_exit_signal(
+        self,
+        df: pd.DataFrame,
+        entry_price: float,
+        stop_loss_pct: float = 0.02,
+        is_hedge: bool = False,
+        hedge_entry_price: float = 0.0,
+        current_hedge_price: Optional[float] = None,
+    ) -> Optional[Signal]:
+        """
+        Check for hedge/short exit signal.
+
+        When use_inverse_etf=True: Sell SQQQ (hedge exit)
+        When use_inverse_etf=False: Cover TQQQ short
+
+        Exit conditions (any of):
+        1. RSI(2) <= rsi_oversold_short (mean reversion complete)
+        2. Stop loss triggered
+        3. Close below previous day's low (for shorts)
+
+        Args:
+            df: DataFrame with indicators (TQQQ data)
+            entry_price: TQQQ entry price (for RSI-based shorts)
+            stop_loss_pct: Stop loss percentage
+            is_hedge: Whether this is a hedge position (SQQQ)
+            hedge_entry_price: SQQQ entry price for stop loss calculation
+            current_hedge_price: Current SQQQ price for stop loss check
+
+        Returns:
+            Signal if exit conditions met, None otherwise
+        """
+        if len(df) < 2:
+            return None
+
+        latest = df.iloc[-1]
+        timestamp = df.index[-1]
+
+        # Determine signal type and symbol based on position type
+        if is_hedge or self.use_inverse_etf:
+            signal_type = SignalType.HEDGE_SELL
+            target_symbol = self.inverse_symbol
+            exit_label = "HEDGE_SELL"
+        else:
+            signal_type = SignalType.COVER
+            target_symbol = self.symbol
+            exit_label = "COVER"
+
+        # Exit condition 1: RSI oversold (mean reversion complete)
+        if latest["rsi"] <= self.rsi_oversold_short:
+            reason = f"{exit_label}: TQQQ RSI({self.rsi_period})={latest['rsi']:.1f} <= {self.rsi_oversold_short}"
+            logger.info(f"{exit_label} signal (RSI target): {reason}")
+
+            return Signal(
+                timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
+                signal_type=signal_type,
+                symbol=target_symbol,
+                price=current_hedge_price if is_hedge and current_hedge_price else latest["close"],
+                rsi=latest["rsi"],
+                reason=reason,
+            )
+
+        # Exit condition 2: Stop loss
+        if is_hedge and hedge_entry_price > 0 and current_hedge_price is not None:
+            # For SQQQ hedge: stop loss if SQQQ price drops (using actual SQQQ price)
+            loss_pct = (hedge_entry_price - current_hedge_price) / hedge_entry_price
+            if loss_pct >= stop_loss_pct:
+                reason = f"{exit_label}: Stop loss triggered: -{loss_pct*100:.1f}% on SQQQ (threshold: -{stop_loss_pct*100}%)"
+                logger.info(f"{exit_label} signal (stop loss): {reason}")
+                return Signal(
+                    timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
+                    signal_type=signal_type,
+                    symbol=target_symbol,
+                    price=current_hedge_price,
+                    rsi=latest["rsi"],
+                    reason=reason,
+                    strength=0.0,
+                )
+        elif not is_hedge:
+            # For direct short: stop loss if TQQQ price rises
+            loss_pct = (latest["close"] - entry_price) / entry_price
+            if loss_pct >= stop_loss_pct:
+                reason = f"{exit_label}: Stop loss triggered: +{loss_pct*100:.1f}% move against short (threshold: +{stop_loss_pct*100}%)"
+                logger.info(f"{exit_label} signal (stop loss): {reason}")
+                return Signal(
+                    timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
+                    signal_type=signal_type,
+                    symbol=target_symbol,
+                    price=latest["close"],
+                    rsi=latest["rsi"],
+                    reason=reason,
+                    strength=0.0,
+                )
+
+        # Exit condition 3: Momentum shift (for direct shorts only)
+        if not is_hedge:
+            if "prev_low" in df.columns and not pd.isna(latest.get("prev_low")):
+                if latest["close"] < latest["prev_low"]:
+                    reason = f"{exit_label}: Close ${latest['close']:.2f} < Previous Low ${latest['prev_low']:.2f}"
+                    logger.info(f"{exit_label} signal (momentum shift): {reason}")
+                    return Signal(
+                        timestamp=timestamp if isinstance(timestamp, datetime) else timestamp.to_pydatetime(),
+                        signal_type=signal_type,
+                        symbol=target_symbol,
+                        price=latest["close"],
+                        rsi=latest["rsi"],
+                        reason=reason,
+                    )
+
+        return None
+
     def generate_signals(
         self,
         df: pd.DataFrame,
         has_position: bool = False,
         entry_price: Optional[float] = None,
         stop_loss_pct: float = 0.05,
+        position_side: Optional[str] = None,
+        short_stop_loss_pct: Optional[float] = None,
+        hedge_entry_price: Optional[float] = None,
+        current_hedge_price: Optional[float] = None,
     ) -> Optional[Signal]:
         """
         Generate trading signal based on current state.
@@ -294,8 +526,12 @@ class SignalGenerator:
         Args:
             df: DataFrame with OHLCV data (raw or with indicators)
             has_position: Whether currently holding position
-            entry_price: Entry price if in position
-            stop_loss_pct: Stop loss percentage
+            entry_price: Entry price if in position (TQQQ price)
+            stop_loss_pct: Stop loss percentage for long positions
+            position_side: "long", "short", or "hedge" if in position
+            short_stop_loss_pct: Stop loss percentage for short/hedge positions
+            hedge_entry_price: SQQQ entry price for hedge stop loss calculation
+            current_hedge_price: Current SQQQ price for hedge stop loss check
 
         Returns:
             Trading signal or None
@@ -304,7 +540,32 @@ class SignalGenerator:
         if "rsi" not in df.columns:
             df = self.prepare_data(df)
 
+        settings = get_settings()
+        short_sl = short_stop_loss_pct or settings.strategy.short_stop_loss_pct
+
         if has_position and entry_price is not None:
-            return self.generate_exit_signal(df, entry_price, stop_loss_pct)
+            if position_side == "hedge":
+                # Hedge position: SQQQ long
+                return self.generate_short_exit_signal(
+                    df, entry_price, short_sl,
+                    is_hedge=True,
+                    hedge_entry_price=hedge_entry_price or 0.0,
+                    current_hedge_price=current_hedge_price,
+                )
+            elif position_side == "short":
+                # Direct short position: TQQQ short
+                return self.generate_short_exit_signal(df, entry_price, short_sl, is_hedge=False)
+            else:
+                # Long position: TQQQ long
+                return self.generate_exit_signal(df, entry_price, stop_loss_pct)
         else:
-            return self.generate_entry_signal(df, has_position)
+            # Try long entry first, then hedge/short
+            long_signal = self.generate_entry_signal(df, has_position)
+            if long_signal:
+                return long_signal
+
+            # Try hedge/short entry if enabled
+            if self.short_enabled:
+                return self.generate_short_entry_signal(df, has_position)
+
+            return None

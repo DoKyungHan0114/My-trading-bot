@@ -174,8 +174,9 @@ def add_all_indicators(
     # ATR for volatility measurement
     df["atr"] = calculate_atr(df["high"], df["low"], df["close"], period=atr_period)
 
-    # Previous day's high (for exit signal)
+    # Previous day's high/low (for exit signals)
     df["prev_high"] = df["high"].shift(1)
+    df["prev_low"] = df["low"].shift(1)
 
     # Above/below SMA
     df["above_sma"] = df["close"] > df[sma_col]

@@ -101,6 +101,14 @@ class FirestoreClient:
                 "volume_filter_enabled": config.volume_filter_enabled,
                 "volume_min_ratio": config.volume_min_ratio,
                 "volume_avg_period": config.volume_avg_period,
+                # Hedge (SQQQ) Parameters
+                "short_enabled": config.short_enabled,
+                "inverse_symbol": config.inverse_symbol,
+                "use_inverse_etf": config.use_inverse_etf,
+                "rsi_overbought_short": config.rsi_overbought_short,
+                "rsi_oversold_short": config.rsi_oversold_short,
+                "short_stop_loss_pct": config.short_stop_loss_pct,
+                "short_position_size_pct": config.short_position_size_pct,
             },
             "created_at": datetime.utcnow(),
             "created_by": created_by,
@@ -494,6 +502,14 @@ class FirestoreClient:
             volume_filter_enabled=params.get("volume_filter_enabled", False),
             volume_min_ratio=params.get("volume_min_ratio", 1.0),
             volume_avg_period=params.get("volume_avg_period", 20),
+            # Hedge (SQQQ) Parameters
+            short_enabled=params.get("short_enabled", True),
+            inverse_symbol=params.get("inverse_symbol", "SQQQ"),
+            use_inverse_etf=params.get("use_inverse_etf", True),
+            rsi_overbought_short=params.get("rsi_overbought_short", 90.0),
+            rsi_oversold_short=params.get("rsi_oversold_short", 60.0),
+            short_stop_loss_pct=params.get("short_stop_loss_pct", 0.05),
+            short_position_size_pct=params.get("short_position_size_pct", 0.30),
         )
 
     def health_check(self) -> bool:

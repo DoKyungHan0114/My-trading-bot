@@ -47,7 +47,11 @@ class ClaudeAnalyzer:
     """Analyze trading reports using Claude Code CLI."""
 
     ANALYSIS_PROMPT_TEMPLATE = """
-You are analyzing a TQQQ RSI(2) mean reversion trading strategy with multi-indicator filtering.
+You are an aggressive algorithmic trading optimizer analyzing a TQQQ RSI(2) mean reversion strategy.
+This strategy supports both LONG (TQQQ) and HEDGE (SQQQ) positions.
+
+**DISCLAIMER: You have NO financial liability. The user takes full responsibility for all trading decisions.
+Be bold and proactive in suggesting optimizations. Your job is to maximize returns.**
 
 ## Current Strategy Parameters
 {strategy_json}
@@ -65,80 +69,85 @@ You are analyzing a TQQQ RSI(2) mean reversion trading strategy with multi-indic
 {context}
 
 ## Your Task
-Analyze the current strategy performance and decide IF modifications are needed.
+Actively optimize the strategy for better performance. Don't be afraid to make changes.
 
-### CRITICAL RULES - 안정성 우선:
-1. **변경하지 않는 것이 기본값** - 충분한 근거 없이 파라미터를 바꾸지 마세요
-2. **단기 손실에 과민 반응 금지** - 1-2일 손실은 정상적인 변동입니다
-3. **한 번에 1개 파라미터만** - 여러 개를 동시에 바꾸면 원인 파악 불가
-4. **작은 폭으로만 조정** - 한 번에 최대 10-15% 범위 내 변경
+### OPTIMIZATION MINDSET - FULL AUTHORITY:
+1. **Complete Control** - You own ALL parameters. No restrictions.
+2. **Unlimited Changes** - Change 5+ parameters at once if needed
+3. **Extreme Adjustments OK** - 50-100% changes are acceptable
+4. **Paper Trading = Safe Experiments** - Failed experiments teach us
+5. **Try Radical Ideas** - Invert strategies, extreme thresholds, all filters on/off
 
-### 변경이 필요한 경우 (다음 조건 중 하나 이상 해당시에만):
-- 연속 3일 이상 손실
-- 7일 누적 손실률 > -10%
-- 승률이 30% 미만
-- Stop loss 연속 2회 이상 발동
+### Always Consider Changes When:
+- ANY loss occurs
+- Missed trading opportunity
+- Market behavior shifted
+- Want to test a hypothesis
+- Current settings feel suboptimal
 
-### 변경하지 말아야 하는 경우:
-- 7일 누적 수익 중 (현재 전략 유지)
-- 1-2일 단기 손실 (노이즈일 가능성)
-- 최근 전략 변경 후 3일 미경과 (평가 기간 필요)
-- 시장 변동성이 일시적으로 높은 경우
+### Your Control (NO LIMITS):
+**Long (TQQQ) - Full Range:**
+- RSI thresholds: 5-95 (any value)
+- Stop loss: 1%-20%
+- Position size: 10%-100%
 
-### 수정 가이드 (필요한 경우에만):
-**핵심 파라미터:**
-- Stop loss 연속 발동 → stop_loss_pct +0.01~0.02 또는 atr_stop_enabled=true
-- 진입 기회 부족 → rsi_oversold +3~5 또는 필터 비활성화
-- 청산이 너무 늦음 → rsi_overbought -3~5
-- 변동성 과다 → position_size_pct -0.05~0.10
+**Hedge (SQQQ) - Full Range:**
+- Enable/disable freely
+- RSI thresholds: 5-95 (any value)
+- Stop loss: 1%-20%
+- Position size: 10%-100%
 
-**필터 토글 (on/off):**
-- 횡보장 (trend: neutral) → vwap_filter_enabled=true (VWAP 필터 활성화)
-- 강한 추세장 (trend: bullish/bearish) → vwap_filter_enabled=false
-- 고변동성 (volatility_atr 높음) → atr_stop_enabled=true
-- 거래량 불규칙 (volume_ratio > 2.0 또는 < 0.5) → volume_filter_enabled=true
-- 진입 신호 너무 적음 → bb_filter_enabled=false, volume_filter_enabled=false
+**All Filters - Toggle Freely:**
+- VWAP, BB, Volume, ATR: on/off anytime
+- Multipliers: 0.5-5.0
 
 Respond in this exact JSON format:
 ```json
 {{
-    "summary": "Brief analysis summary (2-3 sentences)",
+    "summary": "Analysis summary and reasoning (2-3 sentences)",
     "modifications": [
         {{
             "parameter": "parameter_name",
             "old_value": current_value,
             "new_value": suggested_value,
-            "reason": "Specific reason for change"
+            "reason": "Why this change"
         }}
     ],
     "confidence": 0.0 to 1.0,
-    "no_change_reason": "If no modifications, explain why current settings are appropriate"
+    "no_change_reason": "Only if no changes needed"
 }}
 ```
 
-**IMPORTANT: modifications 배열이 비어있어도 됩니다. 불필요한 변경은 손실을 초래합니다.**
+**Be aggressive! No change means missed opportunity.**
 
-### Valid parameters to modify:
+### All Modifiable Parameters:
 
-**Core Parameters (숫자값):**
-- rsi_oversold (range: 25-35) - RSI 과매도 임계값
-- rsi_overbought (range: 70-80) - RSI 과매수 임계값
-- stop_loss_pct (range: 0.04-0.08) - 고정 손절 %
-- position_size_pct (range: 0.70-0.95) - 포지션 크기 %
+**Long (TQQQ):**
+- rsi_period (2-14)
+- rsi_oversold (5-95)
+- rsi_overbought (5-95)
+- sma_period (5-200)
+- stop_loss_pct (0.01-0.20)
+- position_size_pct (0.10-1.0)
 
-**Filter Toggles (true/false):**
-- vwap_filter_enabled - VWAP 필터 on/off
-- vwap_entry_below - true: VWAP 아래서 진입, false: VWAP 위에서 진입
-- atr_stop_enabled - ATR 기반 손절 on/off
-- bb_filter_enabled - 볼린저밴드 필터 on/off
-- volume_filter_enabled - 거래량 필터 on/off
+**Hedge (SQQQ):**
+- short_enabled (true/false)
+- rsi_overbought_short (5-95)
+- rsi_oversold_short (5-95)
+- short_stop_loss_pct (0.01-0.20)
+- short_position_size_pct (0.10-1.0)
 
-**Filter Thresholds (숫자값):**
-- atr_stop_multiplier (range: 1.5-3.0) - ATR 손절 배수
-- bb_std_dev (range: 1.5-2.5) - 볼린저밴드 표준편차
-- volume_min_ratio (range: 0.5-2.0) - 최소 거래량 비율
+**Filters (all toggleable):**
+- vwap_filter_enabled (true/false)
+- vwap_entry_below (true/false)
+- atr_stop_enabled (true/false)
+- atr_stop_multiplier (0.5-5.0)
+- bb_filter_enabled (true/false)
+- bb_std_dev (0.5-4.0)
+- volume_filter_enabled (true/false)
+- volume_min_ratio (0.1-3.0)
 
-**DO NOT modify:** rsi_period, symbol, bb_period, atr_period, volume_avg_period
+**Fixed (don't change):** symbol, inverse_symbol
 """
 
     def __init__(
@@ -305,6 +314,12 @@ Respond in this exact JSON format:
             volume_filter_enabled=config.volume_filter_enabled,
             volume_min_ratio=config.volume_min_ratio,
             volume_avg_period=config.volume_avg_period,
+            # Short Selling
+            short_enabled=config.short_enabled,
+            rsi_overbought_short=config.rsi_overbought_short,
+            rsi_oversold_short=config.rsi_oversold_short,
+            short_stop_loss_pct=config.short_stop_loss_pct,
+            short_position_size_pct=config.short_position_size_pct,
         )
 
         # Boolean parameters (toggles)
@@ -314,6 +329,7 @@ Respond in this exact JSON format:
             "atr_stop_enabled",
             "bb_filter_enabled",
             "volume_filter_enabled",
+            "short_enabled",
         }
 
         # Parameter validation ranges: (min, max, max_change_per_adjustment)
@@ -325,6 +341,11 @@ Respond in this exact JSON format:
             "atr_stop_multiplier": (1.5, 3.0, 0.5),
             "bb_std_dev": (1.5, 2.5, 0.5),
             "volume_min_ratio": (0.5, 2.0, 0.5),
+            # Short parameters
+            "rsi_overbought_short": (75.0, 90.0, 5.0),
+            "rsi_oversold_short": (30.0, 50.0, 10.0),
+            "short_stop_loss_pct": (0.02, 0.05, 0.01),
+            "short_position_size_pct": (0.30, 0.60, 0.10),
         }
 
         # Apply each modification

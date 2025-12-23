@@ -32,6 +32,14 @@ from config.constants import (
     VWAP_ENTRY_BELOW,
     VWAP_FILTER_ENABLED,
     TradingMode,
+    # Inverse/Hedge trading constants
+    SHORT_ENABLED,
+    INVERSE_SYMBOL,
+    USE_INVERSE_ETF,
+    RSI_OVERBOUGHT_SHORT,
+    RSI_OVERSOLD_SHORT,
+    SHORT_STOP_LOSS_PCT,
+    SHORT_POSITION_SIZE_PCT,
 )
 
 # Load environment variables
@@ -98,6 +106,14 @@ class StrategyConfig:
     volume_filter_enabled: bool = VOLUME_FILTER_ENABLED
     volume_min_ratio: float = VOLUME_MIN_RATIO
     volume_avg_period: int = VOLUME_AVG_PERIOD
+    # Inverse/Hedge Trading (SQQQ)
+    short_enabled: bool = SHORT_ENABLED
+    inverse_symbol: str = INVERSE_SYMBOL
+    use_inverse_etf: bool = USE_INVERSE_ETF
+    rsi_overbought_short: float = RSI_OVERBOUGHT_SHORT
+    rsi_oversold_short: float = RSI_OVERSOLD_SHORT
+    short_stop_loss_pct: float = SHORT_STOP_LOSS_PCT
+    short_position_size_pct: float = SHORT_POSITION_SIZE_PCT
 
 
 @dataclass

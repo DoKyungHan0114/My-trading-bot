@@ -35,8 +35,12 @@ class OrderStatus(Enum):
 
 class SignalType(Enum):
     """Trading signal types."""
-    BUY = "BUY"
-    SELL = "SELL"
+    BUY = "BUY"              # Long entry (TQQQ)
+    SELL = "SELL"            # Long exit (TQQQ)
+    SHORT = "SHORT"          # Short entry (TQQQ direct short)
+    COVER = "COVER"          # Short exit (buy to cover)
+    HEDGE_BUY = "HEDGE_BUY"  # Hedge entry (SQQQ long)
+    HEDGE_SELL = "HEDGE_SELL"  # Hedge exit (SQQQ sell)
     HOLD = "HOLD"
 
 
@@ -73,6 +77,15 @@ BB_STD_DEV: Final[float] = 2.0
 VOLUME_FILTER_ENABLED: Final[bool] = False  # 거래량 필터 (기본 비활성)
 VOLUME_MIN_RATIO: Final[float] = 1.0  # 20일 평균 대비 최소 비율
 VOLUME_AVG_PERIOD: Final[int] = 20
+
+# Inverse/Hedge Trading (SQQQ 롱으로 헷지)
+SHORT_ENABLED: Final[bool] = True  # 헷지 전략 활성화
+INVERSE_SYMBOL: Final[str] = "SQQQ"  # 인버스 ETF (TQQQ 숏 대신 SQQQ 롱)
+USE_INVERSE_ETF: Final[bool] = True  # True: SQQQ 롱, False: TQQQ 직접 숏
+RSI_OVERBOUGHT_SHORT: Final[float] = 90.0  # 헷지 진입 RSI 임계값 (매우 보수적)
+RSI_OVERSOLD_SHORT: Final[float] = 60.0  # 헷지 청산 RSI 임계값 (빠른 청산)
+SHORT_STOP_LOSS_PCT: Final[float] = 0.05  # 헷지 손절 5% (여유있게)
+SHORT_POSITION_SIZE_PCT: Final[float] = 0.30  # 헷지 포지션 크기 30% (보수적)
 
 # Time Constants
 US_MARKET_OPEN_HOUR: Final[int] = 9

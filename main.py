@@ -20,7 +20,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config.settings import get_settings, configure_for_mode, StrategyConfig
-from config.constants import TradingMode, SYMBOL
+from config.constants import TradingMode, SYMBOL, INVERSE_SYMBOL
 from data.fetcher import DataFetcher
 from strategy.signals import SignalGenerator
 from strategy.risk_manager import RiskManager
@@ -88,10 +88,14 @@ class TradingBot:
                 logger.warning(f"Firestore not available: {e}")
                 self.firestore = None
 
-        # State
+        # State - Long (TQQQ)
         self.running = False
         self.entry_price: Optional[float] = None
         self.entry_date: Optional[datetime] = None
+
+        # State - Hedge (SQQQ)
+        self.hedge_entry_price: Optional[float] = None
+        self.hedge_entry_date: Optional[datetime] = None
 
         # Signal handlers
         signal.signal(signal.SIGINT, self._handle_shutdown)
@@ -185,10 +189,14 @@ class TradingBot:
     def _check_signals(self):
         """Check for trading signals and execute trades."""
         settings = self.settings
+        strategy = settings.strategy
 
-        # Get current position
-        position = self.broker.get_position(SYMBOL)
-        has_position = position is not None
+        # Get current positions
+        long_position = self.broker.get_position(SYMBOL)
+        hedge_position = self.broker.get_position(INVERSE_SYMBOL) if strategy.short_enabled else None
+
+        has_long = long_position is not None
+        has_hedge = hedge_position is not None
 
         # Fetch recent data (need enough for SMA calculation)
         end_date = datetime.now().strftime("%Y-%m-%d")
@@ -196,31 +204,25 @@ class TradingBot:
 
         df = self.data_fetcher.get_daily_bars(SYMBOL, start_date, end_date)
 
-        if len(df) < settings.strategy.sma_period:
+        if len(df) < strategy.sma_period:
             logger.warning("Insufficient data for analysis")
             return
 
         # Prepare data with indicators
         df = self.signal_generator.prepare_data(df)
 
-        # Check for signals
-        if has_position:
-            # Check for exit signal
+        # === LONG POSITION (TQQQ) ===
+        if has_long:
             signal = self.signal_generator.generate_exit_signal(
                 df,
-                entry_price=self.entry_price or position["avg_entry_price"],
-                stop_loss_pct=settings.strategy.stop_loss_pct,
+                entry_price=self.entry_price or long_position["avg_entry_price"],
+                stop_loss_pct=strategy.stop_loss_pct,
             )
-
             if signal:
-                self._execute_sell(position, signal.reason)
-
+                self._execute_sell(long_position, signal.reason)
         else:
-            # Check for entry signal
             signal = self.signal_generator.generate_entry_signal(df, has_position=False)
-
             if signal:
-                # Notify signal first
                 if self.discord.enabled:
                     self.discord.send_signal(
                         signal_type=signal.signal_type.value,
@@ -229,8 +231,41 @@ class TradingBot:
                         rsi=signal.rsi,
                         reason=signal.reason,
                     )
-
                 self._execute_buy(signal.price, signal.reason)
+
+        # === HEDGE POSITION (SQQQ) ===
+        if strategy.short_enabled:
+            # Fetch SQQQ data for hedge signals
+            hedge_df = self.data_fetcher.get_daily_bars(INVERSE_SYMBOL, start_date, end_date)
+            if len(hedge_df) > 0:
+                current_hedge_price = float(hedge_df.iloc[-1]["close"])
+
+                if has_hedge:
+                    # Check hedge exit
+                    signal = self.signal_generator.generate_short_exit_signal(
+                        df,
+                        entry_price=self.entry_price or 0,
+                        stop_loss_pct=strategy.short_stop_loss_pct,
+                        is_hedge=True,
+                        hedge_entry_price=self.hedge_entry_price or hedge_position["avg_entry_price"],
+                        current_hedge_price=current_hedge_price,
+                    )
+                    if signal:
+                        self._execute_hedge_sell(hedge_position, signal.reason)
+                else:
+                    # Check hedge entry (only if no long position - don't hedge and long at same time)
+                    if not has_long:
+                        signal = self.signal_generator.generate_short_entry_signal(df)
+                        if signal:
+                            if self.discord.enabled:
+                                self.discord.send_signal(
+                                    signal_type="HEDGE_BUY",
+                                    symbol=INVERSE_SYMBOL,
+                                    price=current_hedge_price,
+                                    rsi=signal.rsi,
+                                    reason=signal.reason,
+                                )
+                            self._execute_hedge_buy(current_hedge_price, signal.reason)
 
     def _execute_buy(self, current_price: float, reason: str):
         """Execute buy order."""
@@ -365,6 +400,142 @@ class TradingBot:
             # Reset state
             self.entry_price = None
             self.entry_date = None
+
+    def _execute_hedge_buy(self, current_price: float, reason: str):
+        """Execute hedge buy order (SQQQ long)."""
+        account = self.broker.get_account()
+        strategy = self.settings.strategy
+
+        # Calculate hedge position size
+        pos_size = self.risk_manager.calculate_position_size(
+            account_value=account["equity"],
+            current_price=current_price,
+            use_fractional=True,
+            position_size_pct=strategy.short_position_size_pct,
+        )
+
+        if pos_size.shares <= 0:
+            logger.warning("Hedge position size too small")
+            return
+
+        # Create and submit order
+        order = Order.market_buy(
+            symbol=INVERSE_SYMBOL,
+            quantity=pos_size.shares,
+            signal_reason=reason,
+        )
+
+        filled_order = self.broker.submit_order(order)
+
+        if filled_order.is_filled:
+            self.hedge_entry_price = filled_order.fill_price
+            self.hedge_entry_date = filled_order.filled_at
+
+            # Log trade
+            self.trade_logger.log_trade(
+                symbol=INVERSE_SYMBOL,
+                side="HEDGE_BUY",
+                quantity=filled_order.filled_quantity,
+                price=current_price,
+                fill_price=filled_order.fill_price,
+                order_type=filled_order.order_type.value,
+                signal_reason=reason,
+                order_id_alpaca=filled_order.alpaca_order_id,
+            )
+
+            # Audit
+            self.audit_trail.log_order(
+                AuditEventType.ORDER_FILLED,
+                order_id=filled_order.order_id,
+                symbol=INVERSE_SYMBOL,
+                side="HEDGE_BUY",
+                quantity=filled_order.filled_quantity,
+                price=filled_order.fill_price,
+            )
+
+            # Discord notification
+            if self.discord.enabled:
+                self.discord.send_trade_notification(
+                    symbol=INVERSE_SYMBOL,
+                    side="HEDGE_BUY",
+                    quantity=filled_order.filled_quantity,
+                    price=filled_order.fill_price,
+                    reason=reason,
+                )
+
+            logger.info(
+                f"HEDGE_BUY executed: {filled_order.filled_quantity:.4f} {INVERSE_SYMBOL} "
+                f"@ ${filled_order.fill_price:.2f}"
+            )
+
+    def _execute_hedge_sell(self, position: dict, reason: str):
+        """Execute hedge sell order (SQQQ close)."""
+        quantity = position["quantity"]
+        entry_price = self.hedge_entry_price or position["avg_entry_price"]
+
+        # Create and submit order
+        order = Order.market_sell(
+            symbol=INVERSE_SYMBOL,
+            quantity=quantity,
+            signal_reason=reason,
+        )
+
+        filled_order = self.broker.submit_order(order)
+
+        if filled_order.is_filled:
+            # Calculate P&L
+            pnl = (filled_order.fill_price - entry_price) * quantity
+            pnl_pct = (pnl / (entry_price * quantity)) * 100
+
+            holding_days = 0
+            if self.hedge_entry_date:
+                holding_days = (datetime.utcnow() - self.hedge_entry_date).days
+
+            # Log trade
+            self.trade_logger.log_trade(
+                symbol=INVERSE_SYMBOL,
+                side="HEDGE_SELL",
+                quantity=filled_order.filled_quantity,
+                price=filled_order.fill_price,
+                fill_price=filled_order.fill_price,
+                order_type=filled_order.order_type.value,
+                signal_reason=reason,
+                order_id_alpaca=filled_order.alpaca_order_id,
+                realized_pnl_usd=pnl,
+                holding_period_days=holding_days,
+            )
+
+            # Audit
+            self.audit_trail.log_order(
+                AuditEventType.ORDER_FILLED,
+                order_id=filled_order.order_id,
+                symbol=INVERSE_SYMBOL,
+                side="HEDGE_SELL",
+                quantity=filled_order.filled_quantity,
+                price=filled_order.fill_price,
+                pnl=pnl,
+            )
+
+            # Discord notification
+            if self.discord.enabled:
+                self.discord.send_trade_notification(
+                    symbol=INVERSE_SYMBOL,
+                    side="HEDGE_SELL",
+                    quantity=filled_order.filled_quantity,
+                    price=filled_order.fill_price,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    reason=reason,
+                )
+
+            logger.info(
+                f"HEDGE_SELL executed: {filled_order.filled_quantity:.4f} {INVERSE_SYMBOL} "
+                f"@ ${filled_order.fill_price:.2f}, P&L: ${pnl:+.2f} ({pnl_pct:+.2f}%)"
+            )
+
+            # Reset hedge state
+            self.hedge_entry_price = None
+            self.hedge_entry_date = None
 
     def _load_initial_strategy(self):
         """Load initial strategy from Firestore if available."""

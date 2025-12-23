@@ -56,6 +56,7 @@ class RiskManager:
         account_value: float,
         current_price: float,
         use_fractional: bool = True,
+        position_size_pct: Optional[float] = None,
     ) -> PositionSize:
         """
         Calculate position size based on account value and risk parameters.
@@ -64,12 +65,14 @@ class RiskManager:
             account_value: Total account value
             current_price: Current price of the asset
             use_fractional: Whether to use fractional shares
+            position_size_pct: Override default position size percentage (for shorts)
 
         Returns:
             PositionSize with calculated values
         """
         # Calculate available capital (account - cash reserve)
-        available_capital = account_value * self.position_size_pct
+        pct = position_size_pct if position_size_pct is not None else self.position_size_pct
+        available_capital = account_value * pct
 
         # Apply maximum position cap if set
         if self.max_position_value:
