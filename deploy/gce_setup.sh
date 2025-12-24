@@ -66,12 +66,19 @@ useradd -m -s /bin/bash tqqq || true
 su - tqqq << 'USER_EOF'
 cd /home/tqqq
 
+# Get GitHub token from Secret Manager
+GITHUB_TOKEN=$(gcloud secrets versions access latest --secret="github-token" 2>/dev/null || echo "")
+
 # Clone or pull repository
 if [ -d "tqqq-trading-system" ]; then
     cd tqqq-trading-system
     git pull
 else
-    git clone https://github.com/DoKyungHan0114/My-trading-bot.git tqqq-trading-system
+    if [ -n "$GITHUB_TOKEN" ]; then
+        git clone https://${GITHUB_TOKEN}@github.com/DoKyungHan0114/My-trading-bot.git tqqq-trading-system
+    else
+        git clone https://github.com/DoKyungHan0114/My-trading-bot.git tqqq-trading-system
+    fi
     cd tqqq-trading-system
 fi
 
