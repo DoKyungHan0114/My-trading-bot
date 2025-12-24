@@ -132,9 +132,30 @@ RestartSec=10
 WantedBy=multi-user.target
 SERVICE_EOF
 
+# Setup systemd service for Discord bot
+cat > /etc/systemd/system/tqqq-discord-bot.service << 'SERVICE_EOF'
+[Unit]
+Description=TQQQ Discord Bot
+After=network.target
+
+[Service]
+Type=simple
+User=tqqq
+WorkingDirectory=/home/tqqq/tqqq-trading-system
+Environment=PATH=/home/tqqq/tqqq-trading-system/venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/tqqq/tqqq-trading-system/venv/bin/python discord_bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
 systemctl daemon-reload
 systemctl enable tqqq-trading-bot
 systemctl start tqqq-trading-bot
+systemctl enable tqqq-discord-bot
+systemctl start tqqq-discord-bot
 
 echo "Startup complete!"
 STARTUP_EOF

@@ -19,6 +19,9 @@ seaborn>=0.13.0
 requests>=2.31.0
 aiohttp>=3.9.0
 
+# Discord Bot
+discord.py>=2.3.0
+
 # Environment Variables
 python-dotenv>=1.0.0
 
