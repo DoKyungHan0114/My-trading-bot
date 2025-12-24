@@ -7,8 +7,9 @@ set -e
 # Configuration
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-your-project-id}"
 ZONE="${GCE_ZONE:-us-central1-a}"
-INSTANCE_NAME="${GCE_INSTANCE:-tqqq-claude-runner}"
-MACHINE_TYPE="e2-medium"
+INSTANCE_NAME="${GCE_INSTANCE:-tqqq-trading-bot}"
+MACHINE_TYPE="e2-small"
+USE_SPOT="true"
 SERVICE_ACCOUNT="tqqq-claude-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
 echo "=== TQQQ Trading System - GCE Claude Runner Setup ==="
@@ -70,7 +71,7 @@ if [ -d "tqqq-trading-system" ]; then
     cd tqqq-trading-system
     git pull
 else
-    git clone https://github.com/YOUR_REPO/tqqq-trading-system.git
+    git clone https://github.com/DoKyungHan0114/My-trading-bot.git tqqq-trading-system
     cd tqqq-trading-system
 fi
 
@@ -86,7 +87,26 @@ gcloud secrets versions access latest --secret="tqqq-env-file" > .env 2>/dev/nul
 
 USER_EOF
 
-# Setup systemd service for scheduler
+# Setup systemd service for trading bot (main service)
+cat > /etc/systemd/system/tqqq-trading-bot.service << 'SERVICE_EOF'
+[Unit]
+Description=TQQQ Live Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=tqqq
+WorkingDirectory=/home/tqqq/tqqq-trading-system
+Environment=PATH=/home/tqqq/tqqq-trading-system/venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/tqqq/tqqq-trading-system/venv/bin/python main.py --mode paper
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+# Setup systemd service for scheduler (optional)
 cat > /etc/systemd/system/tqqq-scheduler.service << 'SERVICE_EOF'
 [Unit]
 Description=TQQQ Trading Scheduler
@@ -106,8 +126,8 @@ WantedBy=multi-user.target
 SERVICE_EOF
 
 systemctl daemon-reload
-systemctl enable tqqq-scheduler
-systemctl start tqqq-scheduler
+systemctl enable tqqq-trading-bot
+systemctl start tqqq-trading-bot
 
 echo "Startup complete!"
 STARTUP_EOF
@@ -121,18 +141,31 @@ if gcloud compute instances describe "${INSTANCE_NAME}" --zone="${ZONE}" --proje
         --project="${PROJECT_ID}"
 else
     echo "Creating instance ${INSTANCE_NAME}..."
-    gcloud compute instances create "${INSTANCE_NAME}" \
-        --zone="${ZONE}" \
-        --machine-type="${MACHINE_TYPE}" \
-        --service-account="${SERVICE_ACCOUNT}" \
-        --scopes="cloud-platform" \
-        --image-family="debian-12" \
-        --image-project="debian-cloud" \
-        --boot-disk-size="20GB" \
-        --boot-disk-type="pd-standard" \
+
+    # Build create command
+    CREATE_CMD="gcloud compute instances create ${INSTANCE_NAME} \
+        --zone=${ZONE} \
+        --machine-type=${MACHINE_TYPE} \
+        --service-account=${SERVICE_ACCOUNT} \
+        --scopes=cloud-platform \
+        --image-family=debian-12 \
+        --image-project=debian-cloud \
+        --boot-disk-size=20GB \
+        --boot-disk-type=pd-standard \
         --metadata-from-file=startup-script=/tmp/startup-script.sh \
-        --tags="tqqq-runner" \
-        --project="${PROJECT_ID}"
+        --tags=tqqq-runner \
+        --project=${PROJECT_ID}"
+
+    # Add Spot VM options if enabled (70% cheaper)
+    if [ "${USE_SPOT}" = "true" ]; then
+        echo "Using Spot VM (preemptible) for cost savings..."
+        CREATE_CMD="${CREATE_CMD} \
+            --provisioning-model=SPOT \
+            --instance-termination-action=STOP \
+            --maintenance-policy=TERMINATE"
+    fi
+
+    eval "${CREATE_CMD}"
 fi
 
 rm /tmp/startup-script.sh
@@ -140,17 +173,31 @@ rm /tmp/startup-script.sh
 echo ""
 echo "=== Setup Complete ==="
 echo ""
-echo "Instance created: ${INSTANCE_NAME}"
+echo "Instance: ${INSTANCE_NAME}"
+echo "Type: ${MACHINE_TYPE} $([ "${USE_SPOT}" = "true" ] && echo "(Spot VM - 70% cheaper)")"
+echo "Estimated cost: ~\$6-8/month"
 echo ""
-echo "To SSH into the instance:"
+echo "Commands:"
+echo "  # SSH into instance"
 echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE}"
 echo ""
-echo "To view scheduler logs:"
-echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- journalctl -u tqqq-scheduler -f"
+echo "  # View trading bot logs"
+echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- journalctl -u tqqq-trading-bot -f"
 echo ""
-echo "IMPORTANT: Configure Claude API key on the instance:"
-echo "  1. SSH into the instance"
-echo "  2. Run: claude config set api_key YOUR_ANTHROPIC_API_KEY"
+echo "  # Check bot status"
+echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- systemctl status tqqq-trading-bot"
 echo ""
-echo "Or store it in Secret Manager:"
-echo "  gcloud secrets create claude-api-key --data-file=- <<< 'YOUR_API_KEY'"
+echo "  # Switch to live trading (CAUTION!)"
+echo "  # Edit /etc/systemd/system/tqqq-trading-bot.service and change --mode paper to --mode live"
+echo ""
+echo "IMPORTANT - Before starting:"
+echo "  1. Create .env secret in Secret Manager:"
+echo "     gcloud secrets create tqqq-env-file --data-file=.env"
+echo ""
+echo "  2. For Spot VM auto-restart, set up monitoring:"
+echo "     ./deploy/spot_vm_monitor.sh  # Run via cron or Cloud Scheduler"
+echo ""
+if [ "${USE_SPOT}" = "true" ]; then
+echo "NOTE: Spot VM may be preempted by GCP. The bot will auto-restart when VM restarts."
+echo "      Consider running spot_vm_monitor.sh every 5 min via Cloud Scheduler for auto-restart."
+fi

@@ -47,6 +47,11 @@ gcloud scheduler jobs delete tqqq-analysis-afternoon \
     --project="${PROJECT_ID}" \
     --quiet 2>/dev/null || true
 
+gcloud scheduler jobs delete tqqq-spot-vm-monitor \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --quiet 2>/dev/null || true
+
 # Create morning analysis job (11:00 AM ET = 16:00 UTC in winter, 15:00 UTC in summer)
 # Using 15:00 UTC for simplicity (during DST)
 echo "Creating morning analysis job (11:00 AM ET)..."
