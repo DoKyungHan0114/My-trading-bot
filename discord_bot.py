@@ -69,7 +69,7 @@ async def status(interaction: discord.Interaction):
         trading_client = TradingClient(
             bot.settings.alpaca.api_key,
             bot.settings.alpaca.secret_key,
-            paper=bot.settings.alpaca.paper,
+            paper=bot.settings.alpaca.is_paper,
         )
         account = trading_client.get_account()
         positions = trading_client.get_all_positions()
@@ -132,7 +132,7 @@ async def status(interaction: discord.Interaction):
             value=pos_text,
             inline=False,
         )
-        embed.set_footer(text="Paper Trading" if bot.settings.alpaca.paper else "Live Trading")
+        embed.set_footer(text="Paper Trading" if bot.settings.alpaca.is_paper else "Live Trading")
 
         await interaction.followup.send(embed=embed)
 
@@ -152,7 +152,7 @@ async def positions(interaction: discord.Interaction):
         trading_client = TradingClient(
             bot.settings.alpaca.api_key,
             bot.settings.alpaca.secret_key,
-            paper=bot.settings.alpaca.paper,
+            paper=bot.settings.alpaca.is_paper,
         )
         positions = trading_client.get_all_positions()
 
