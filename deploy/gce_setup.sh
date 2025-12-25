@@ -1,163 +1,219 @@
 #!/bin/bash
-# Compute Engine setup script for Claude Code automation
-# This script sets up a GCE instance to run Claude Code CLI for strategy analysis
+# Compute Engine setup script for TQQQ Trading Bot (Docker-based)
+# Pulls pre-built images from Artifact Registry
 
 set -e
 
 # Configuration
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:-your-project-id}"
 ZONE="${GCE_ZONE:-us-central1-a}"
+REGION="${GCE_REGION:-us-central1}"
 INSTANCE_NAME="${GCE_INSTANCE:-tqqq-trading-bot}"
 MACHINE_TYPE="e2-small"
 USE_SPOT="true"
 SERVICE_ACCOUNT="tqqq-claude-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
-echo "=== TQQQ Trading System - GCE Claude Runner Setup ==="
+# Artifact Registry
+AR_REPO="tqqq"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/bot:${IMAGE_TAG}"
+
+echo "=== TQQQ Trading System - GCE Docker Deployment ==="
 echo "Project: ${PROJECT_ID}"
 echo "Zone: ${ZONE}"
 echo "Instance: ${INSTANCE_NAME}"
+echo "Image: ${IMAGE_URL}"
 echo ""
 
 # Enable required APIs
 echo "Enabling required APIs..."
 gcloud services enable compute.googleapis.com --project="${PROJECT_ID}"
 gcloud services enable secretmanager.googleapis.com --project="${PROJECT_ID}"
+gcloud services enable artifactregistry.googleapis.com --project="${PROJECT_ID}"
+
+# Create Artifact Registry repository (if not exists)
+echo "Setting up Artifact Registry..."
+gcloud artifacts repositories create "${AR_REPO}" \
+    --repository-format=docker \
+    --location="${REGION}" \
+    --description="TQQQ Trading Bot images" \
+    --project="${PROJECT_ID}" 2>/dev/null || echo "Repository already exists"
 
 # Create service account
 echo "Creating service account..."
 gcloud iam service-accounts create tqqq-claude-sa \
-    --display-name="TQQQ Claude Runner Service Account" \
+    --display-name="TQQQ Trading Bot Service Account" \
     --project="${PROJECT_ID}" 2>/dev/null || echo "Service account already exists"
 
 # Grant necessary roles
 echo "Granting permissions..."
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${SERVICE_ACCOUNT}" \
-    --role="roles/datastore.user"
-
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${SERVICE_ACCOUNT}" \
-    --role="roles/secretmanager.secretAccessor"
-
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${SERVICE_ACCOUNT}" \
-    --role="roles/logging.logWriter"
+for role in "roles/datastore.user" "roles/secretmanager.secretAccessor" "roles/logging.logWriter" "roles/artifactregistry.reader"; do
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member="serviceAccount:${SERVICE_ACCOUNT}" \
+        --role="${role}" \
+        --quiet
+done
 
 # Create startup script
-cat > /tmp/startup-script.sh << 'STARTUP_EOF'
+cat > /tmp/startup-script.sh << STARTUP_EOF
 #!/bin/bash
 set -e
 
-# Install dependencies
-apt-get update
-apt-get install -y python3 python3-pip python3-venv git curl
+echo "=== Starting TQQQ Trading Bot Setup ==="
 
-# Install Node.js (for Claude Code)
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
-
-# Install Claude Code CLI
-npm install -g @anthropic-ai/claude-code
-
-# Create app user
-useradd -m -s /bin/bash tqqq || true
-
-# Clone repository
-su - tqqq << 'USER_EOF'
-cd /home/tqqq
-
-# Get GitHub token from Secret Manager
-GITHUB_TOKEN=$(gcloud secrets versions access latest --secret="github-token" 2>/dev/null || echo "")
-
-# Clone or pull repository
-if [ -d "tqqq-trading-system" ]; then
-    cd tqqq-trading-system
-    git pull
-else
-    if [ -n "$GITHUB_TOKEN" ]; then
-        git clone https://${GITHUB_TOKEN}@github.com/DoKyungHan0114/My-trading-bot.git tqqq-trading-system
-    else
-        git clone https://github.com/DoKyungHan0114/My-trading-bot.git tqqq-trading-system
-    fi
-    cd tqqq-trading-system
+# Install Docker
+if ! command -v docker &> /dev/null; then
+    echo "Installing Docker..."
+    apt-get update
+    apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian \$(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io
+    systemctl enable docker
+    systemctl start docker
 fi
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# Configure Docker to use Artifact Registry
+gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Pull latest image
+echo "Pulling image: ${IMAGE_URL}"
+docker pull ${IMAGE_URL}
 
-# Create .env from Secret Manager
-gcloud secrets versions access latest --secret="tqqq-env-file" > .env 2>/dev/null || echo "No env secret found"
+# Get env file from Secret Manager
+echo "Loading environment from Secret Manager..."
+gcloud secrets versions access latest --secret="tqqq-env-file" > /opt/tqqq/.env 2>/dev/null || echo "No env secret found"
+mkdir -p /opt/tqqq
 
-USER_EOF
-
-# Setup systemd service for trading bot (main service)
+# Create systemd service for trading bot
 cat > /etc/systemd/system/tqqq-trading-bot.service << 'SERVICE_EOF'
 [Unit]
-Description=TQQQ Live Trading Bot
-After=network.target
+Description=TQQQ Trading Bot (Docker)
+After=docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
-User=tqqq
-WorkingDirectory=/home/tqqq/tqqq-trading-system
-Environment=PATH=/home/tqqq/tqqq-trading-system/venv/bin:/usr/local/bin:/usr/bin
-ExecStart=/home/tqqq/tqqq-trading-system/venv/bin/python main.py --mode paper
 Restart=always
 RestartSec=30
+ExecStartPre=-/usr/bin/docker stop tqqq-bot
+ExecStartPre=-/usr/bin/docker rm tqqq-bot
+ExecStart=/usr/bin/docker run --rm --name tqqq-bot \
+    --env-file /opt/tqqq/.env \
+    -v /opt/tqqq/logs:/app/logs \
+    ${IMAGE_URL} \
+    python main.py --mode paper
+ExecStop=/usr/bin/docker stop tqqq-bot
 
 [Install]
 WantedBy=multi-user.target
 SERVICE_EOF
 
-# Setup systemd service for scheduler (optional)
-cat > /etc/systemd/system/tqqq-scheduler.service << 'SERVICE_EOF'
-[Unit]
-Description=TQQQ Trading Scheduler
-After=network.target
-
-[Service]
-Type=simple
-User=tqqq
-WorkingDirectory=/home/tqqq/tqqq-trading-system
-Environment=PATH=/home/tqqq/tqqq-trading-system/venv/bin:/usr/local/bin:/usr/bin
-ExecStart=/home/tqqq/tqqq-trading-system/venv/bin/python -m automation.scheduler
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-SERVICE_EOF
-
-# Setup systemd service for Discord bot
+# Create systemd service for Discord bot
 cat > /etc/systemd/system/tqqq-discord-bot.service << 'SERVICE_EOF'
 [Unit]
-Description=TQQQ Discord Bot
-After=network.target
+Description=TQQQ Discord Bot (Docker)
+After=docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
-User=tqqq
-WorkingDirectory=/home/tqqq/tqqq-trading-system
-Environment=PATH=/home/tqqq/tqqq-trading-system/venv/bin:/usr/local/bin:/usr/bin
-ExecStart=/home/tqqq/tqqq-trading-system/venv/bin/python discord_bot.py
 Restart=always
 RestartSec=10
+ExecStartPre=-/usr/bin/docker stop tqqq-discord
+ExecStartPre=-/usr/bin/docker rm tqqq-discord
+ExecStart=/usr/bin/docker run --rm --name tqqq-discord \
+    --env-file /opt/tqqq/.env \
+    ${IMAGE_URL} \
+    python discord_bot.py
+ExecStop=/usr/bin/docker stop tqqq-discord
 
 [Install]
 WantedBy=multi-user.target
 SERVICE_EOF
 
-systemctl daemon-reload
-systemctl enable tqqq-trading-bot
-systemctl start tqqq-trading-bot
-systemctl enable tqqq-discord-bot
-systemctl start tqqq-discord-bot
+# Create update script
+cat > /usr/local/bin/tqqq-update << 'UPDATE_EOF'
+#!/bin/bash
+# Update TQQQ Trading Bot to latest image
+set -e
+echo "Pulling latest image..."
+docker pull ${IMAGE_URL}
+echo "Restarting services..."
+systemctl restart tqqq-trading-bot
+systemctl restart tqqq-discord-bot
+echo "Update complete!"
+docker images | grep tqqq
+UPDATE_EOF
+chmod +x /usr/local/bin/tqqq-update
 
-echo "Startup complete!"
+# Setup daily/weekly report timers
+cat > /etc/systemd/system/tqqq-daily-report.service << 'SERVICE_EOF'
+[Unit]
+Description=TQQQ Daily Trading Report
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker run --rm \
+    --env-file /opt/tqqq/.env \
+    ${IMAGE_URL} \
+    python automation/daily_report.py
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+cat > /etc/systemd/system/tqqq-daily-report.timer << 'TIMER_EOF'
+[Unit]
+Description=Run TQQQ Daily Report after US market close
+
+[Timer]
+OnCalendar=Mon..Fri 16:30 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER_EOF
+
+cat > /etc/systemd/system/tqqq-weekly-report.service << 'SERVICE_EOF'
+[Unit]
+Description=TQQQ Weekly Trading Report
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker run --rm \
+    --env-file /opt/tqqq/.env \
+    ${IMAGE_URL} \
+    python automation/weekly_report.py
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+cat > /etc/systemd/system/tqqq-weekly-report.timer << 'TIMER_EOF'
+[Unit]
+Description=Run TQQQ Weekly Report every Friday
+
+[Timer]
+OnCalendar=Fri 17:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER_EOF
+
+# Enable and start services
+systemctl daemon-reload
+systemctl enable tqqq-trading-bot tqqq-discord-bot
+systemctl start tqqq-trading-bot tqqq-discord-bot
+systemctl enable tqqq-daily-report.timer tqqq-weekly-report.timer
+systemctl start tqqq-daily-report.timer tqqq-weekly-report.timer
+
+echo "=== Startup complete! ==="
+docker ps
 STARTUP_EOF
 
 # Check if instance exists
@@ -170,7 +226,6 @@ if gcloud compute instances describe "${INSTANCE_NAME}" --zone="${ZONE}" --proje
 else
     echo "Creating instance ${INSTANCE_NAME}..."
 
-    # Build create command
     CREATE_CMD="gcloud compute instances create ${INSTANCE_NAME} \
         --zone=${ZONE} \
         --machine-type=${MACHINE_TYPE} \
@@ -184,9 +239,8 @@ else
         --tags=tqqq-runner \
         --project=${PROJECT_ID}"
 
-    # Add Spot VM options if enabled (70% cheaper)
     if [ "${USE_SPOT}" = "true" ]; then
-        echo "Using Spot VM (preemptible) for cost savings..."
+        echo "Using Spot VM for cost savings..."
         CREATE_CMD="${CREATE_CMD} \
             --provisioning-model=SPOT \
             --instance-termination-action=STOP \
@@ -202,30 +256,28 @@ echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Instance: ${INSTANCE_NAME}"
-echo "Type: ${MACHINE_TYPE} $([ "${USE_SPOT}" = "true" ] && echo "(Spot VM - 70% cheaper)")"
-echo "Estimated cost: ~\$6-8/month"
+echo "Type: ${MACHINE_TYPE} $([ "${USE_SPOT}" = "true" ] && echo "(Spot VM)")"
+echo "Image: ${IMAGE_URL}"
 echo ""
-echo "Commands:"
-echo "  # SSH into instance"
-echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE}"
+echo "=== Commands ==="
 echo ""
-echo "  # View trading bot logs"
-echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- journalctl -u tqqq-trading-bot -f"
+echo "# SSH into instance"
+echo "gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE}"
 echo ""
-echo "  # Check bot status"
-echo "  gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- systemctl status tqqq-trading-bot"
+echo "# View trading bot logs"
+echo "gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- docker logs -f tqqq-bot"
 echo ""
-echo "  # Switch to live trading (CAUTION!)"
-echo "  # Edit /etc/systemd/system/tqqq-trading-bot.service and change --mode paper to --mode live"
+echo "# Update to latest image"
+echo "gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE} -- sudo tqqq-update"
 echo ""
-echo "IMPORTANT - Before starting:"
-echo "  1. Create .env secret in Secret Manager:"
-echo "     gcloud secrets create tqqq-env-file --data-file=.env"
+echo "# Switch to live trading"
+echo "# Edit /etc/systemd/system/tqqq-trading-bot.service: change --mode paper to --mode live"
 echo ""
-echo "  2. For Spot VM auto-restart, set up monitoring:"
-echo "     ./deploy/spot_vm_monitor.sh  # Run via cron or Cloud Scheduler"
+echo "=== Before First Deploy ==="
 echo ""
-if [ "${USE_SPOT}" = "true" ]; then
-echo "NOTE: Spot VM may be preempted by GCP. The bot will auto-restart when VM restarts."
-echo "      Consider running spot_vm_monitor.sh every 5 min via Cloud Scheduler for auto-restart."
-fi
+echo "1. Build and push image:"
+echo "   ./deploy/build.sh"
+echo ""
+echo "2. Create env secret:"
+echo "   gcloud secrets create tqqq-env-file --data-file=.env"
+echo ""

@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+.eggs/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs and data (will be mounted as volumes)
+logs/
+reports/
+*.log
+
+# Frontend (if not needed in bot image)
+frontend/node_modules/
+
+# Deploy scripts (not needed in image)
+deploy/
+
+# Tests
+tests/
+test_*.py
+
+# Documentation
+*.md
+docs/
