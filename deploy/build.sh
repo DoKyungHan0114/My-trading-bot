@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build and push TQQQ Trading Bot image to Artifact Registry
+# Build and push TQQQ Trading Bot image using Cloud Build
 # Usage: ./deploy/build.sh [tag]
 
 set -e
@@ -13,7 +13,7 @@ TAG="${1:-latest}"
 
 IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}"
 
-echo "=== Building TQQQ Trading Bot Image ==="
+echo "=== Building TQQQ Trading Bot Image (Cloud Build) ==="
 echo "Project: ${PROJECT_ID}"
 echo "Image: ${IMAGE_URL}:${TAG}"
 echo ""
@@ -22,25 +22,34 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}/.."
 
-# Configure Docker for Artifact Registry
-echo "Configuring Docker authentication..."
-gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+# Enable Cloud Build API
+echo "Enabling Cloud Build API..."
+gcloud services enable cloudbuild.googleapis.com --project="${PROJECT_ID}"
 
-# Build image
-echo "Building image..."
-docker build -f deploy/Dockerfile.bot -t ${IMAGE_URL}:${TAG} .
+# Create Artifact Registry repo if not exists
+echo "Setting up Artifact Registry..."
+gcloud artifacts repositories create "${AR_REPO}" \
+    --repository-format=docker \
+    --location="${REGION}" \
+    --description="TQQQ Trading Bot images" \
+    --project="${PROJECT_ID}" 2>/dev/null || echo "Repository already exists"
 
-# Also tag as latest if building a specific version
+# Build using Cloud Build
+echo "Building with Cloud Build..."
+gcloud builds submit \
+    --tag "${IMAGE_URL}:${TAG}" \
+    --project="${PROJECT_ID}" \
+    --gcs-log-dir="gs://${PROJECT_ID}_cloudbuild/logs" \
+    -q \
+    .
+
+# Also tag as latest if building specific version
 if [ "${TAG}" != "latest" ]; then
-    docker tag ${IMAGE_URL}:${TAG} ${IMAGE_URL}:latest
-fi
-
-# Push image
-echo "Pushing image..."
-docker push ${IMAGE_URL}:${TAG}
-
-if [ "${TAG}" != "latest" ]; then
-    docker push ${IMAGE_URL}:latest
+    echo "Tagging as latest..."
+    gcloud artifacts docker tags add \
+        "${IMAGE_URL}:${TAG}" \
+        "${IMAGE_URL}:latest" \
+        --project="${PROJECT_ID}"
 fi
 
 echo ""
@@ -49,6 +58,3 @@ echo "Image: ${IMAGE_URL}:${TAG}"
 echo ""
 echo "To deploy to GCE:"
 echo "  gcloud compute ssh tqqq-trading-bot --zone=us-central1-a -- sudo tqqq-update"
-echo ""
-echo "Or with specific tag:"
-echo "  IMAGE_TAG=${TAG} ./deploy/gce_setup.sh"

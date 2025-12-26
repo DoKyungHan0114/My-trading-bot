@@ -1,0 +1,58 @@
+name: Deploy to GCE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # 수동 실행 가능
+
+env:
+  PROJECT_ID: short-term-trade
+  REGION: us-central1
+  ZONE: us-central1-a
+  AR_REPO: tqqq
+  IMAGE_NAME: bot
+  INSTANCE_NAME: tqqq-trading-bot
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build with Cloud Build
+        run: |
+          gcloud builds submit \
+            --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --project=${{ env.PROJECT_ID }} \
+            --quiet
+
+      - name: Tag as latest
+        run: |
+          gcloud artifacts docker tags add \
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest \
+            --project=${{ env.PROJECT_ID }}
+
+      - name: Deploy to GCE
+        run: |
+          gcloud compute ssh ${{ env.INSTANCE_NAME }} \
+            --zone=${{ env.ZONE }} \
+            --command="sudo docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest && sudo systemctl restart tqqq-trading-bot && sudo systemctl restart tqqq-discord-bot"
+
+      - name: Verify deployment
+        run: |
+          echo "Waiting for containers to start..."
+          sleep 10
+          gcloud compute ssh ${{ env.INSTANCE_NAME }} \
+            --zone=${{ env.ZONE }} \
+            --command="docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'"

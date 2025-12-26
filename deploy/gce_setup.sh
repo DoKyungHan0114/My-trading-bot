@@ -83,8 +83,8 @@ docker pull ${IMAGE_URL}
 
 # Get env file from Secret Manager
 echo "Loading environment from Secret Manager..."
-gcloud secrets versions access latest --secret="tqqq-env-file" > /opt/tqqq/.env 2>/dev/null || echo "No env secret found"
 mkdir -p /opt/tqqq
+gcloud secrets versions access latest --secret="tqqq-env-file" > /opt/tqqq/.env 2>/dev/null || touch /opt/tqqq/.env
 
 # Create systemd service for trading bot
 cat > /etc/systemd/system/tqqq-trading-bot.service << 'SERVICE_EOF'
