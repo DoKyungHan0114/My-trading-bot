@@ -29,7 +29,8 @@ env/
 
 # Logs and data (will be mounted as volumes)
 logs/
-reports/
+reports/pdf/
+reports/*.json
 *.log
 
 # Frontend (if not needed in bot image)
