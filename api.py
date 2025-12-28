@@ -3,9 +3,11 @@ TQQQ Trading System - Dashboard API Server
 FastAPI server for the React frontend dashboard
 """
 
+import asyncio
 import logging
 import os
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from typing import Optional
@@ -17,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -292,6 +294,215 @@ async def health_check():
         "firestore": firestore_ok,
         "timestamp": datetime.now().isoformat()
     }
+
+
+# =========================================================================
+# COMMAND EXECUTION ENDPOINTS
+# =========================================================================
+
+PROJECT_ROOT = Path(__file__).parent
+
+# Available commands configuration
+COMMANDS = {
+    "backtest": {
+        "name": "Run Backtest",
+        "description": "Run backtest with current strategy",
+        "command": ["./run_backtest.sh"],
+        "cwd": PROJECT_ROOT,
+    },
+    "backtest_loop": {
+        "name": "Run Backtest Loop",
+        "description": "Run multiple backtests with random parameters",
+        "command": ["./run_backtest_loop.sh"],
+        "cwd": PROJECT_ROOT,
+    },
+    "export_strategy": {
+        "name": "Export Strategy",
+        "description": "Export current strategy to JSON",
+        "command": ["python3", "export_strategy.py", "--pretty"],
+        "cwd": PROJECT_ROOT,
+    },
+    "start_trading": {
+        "name": "Start Trading",
+        "description": "Start the trading system",
+        "command": ["./start.sh"],
+        "cwd": PROJECT_ROOT,
+    },
+    "health_check": {
+        "name": "Health Check",
+        "description": "Check system health status",
+        "command": ["python3", "-c", "from api import *; import json; print(json.dumps({'trading_system': TRADING_SYSTEM_AVAILABLE, 'firestore': FIRESTORE_AVAILABLE}))"],
+        "cwd": PROJECT_ROOT,
+    },
+}
+
+
+class CommandInfo(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class CommandResult(BaseModel):
+    command_id: str
+    status: str
+    output: str
+    error: str
+    exit_code: int
+    started_at: str
+    finished_at: str
+
+
+@app.get("/api/commands", response_model=list[CommandInfo])
+async def list_commands():
+    """List available commands"""
+    return [
+        CommandInfo(id=cmd_id, name=cmd["name"], description=cmd["description"])
+        for cmd_id, cmd in COMMANDS.items()
+    ]
+
+
+@app.post("/api/commands/{command_id}/run")
+async def run_command(command_id: str):
+    """Run a command and return the result"""
+    if command_id not in COMMANDS:
+        raise HTTPException(status_code=404, detail=f"Command '{command_id}' not found")
+
+    cmd_config = COMMANDS[command_id]
+    started_at = datetime.now()
+
+    try:
+        result = subprocess.run(
+            cmd_config["command"],
+            cwd=cmd_config["cwd"],
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+
+        return CommandResult(
+            command_id=command_id,
+            status="success" if result.returncode == 0 else "error",
+            output=result.stdout,
+            error=result.stderr,
+            exit_code=result.returncode,
+            started_at=started_at.isoformat(),
+            finished_at=datetime.now().isoformat(),
+        )
+
+    except subprocess.TimeoutExpired:
+        return CommandResult(
+            command_id=command_id,
+            status="timeout",
+            output="",
+            error="Command timed out after 5 minutes",
+            exit_code=-1,
+            started_at=started_at.isoformat(),
+            finished_at=datetime.now().isoformat(),
+        )
+    except Exception as e:
+        return CommandResult(
+            command_id=command_id,
+            status="error",
+            output="",
+            error=str(e),
+            exit_code=-1,
+            started_at=started_at.isoformat(),
+            finished_at=datetime.now().isoformat(),
+        )
+
+
+@app.post("/api/commands/{command_id}/stream")
+async def stream_command(command_id: str):
+    """Run a command and stream the output"""
+    if command_id not in COMMANDS:
+        raise HTTPException(status_code=404, detail=f"Command '{command_id}' not found")
+
+    cmd_config = COMMANDS[command_id]
+
+    async def generate():
+        process = await asyncio.create_subprocess_exec(
+            *cmd_config["command"],
+            cwd=cmd_config["cwd"],
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+
+        async for line in process.stdout:
+            yield line.decode("utf-8", errors="replace")
+
+        await process.wait()
+        yield f"\n[Exit code: {process.returncode}]\n"
+
+    return StreamingResponse(generate(), media_type="text/plain")
+
+
+# =========================================================================
+# PDF REPORT ENDPOINTS
+# =========================================================================
+
+PDF_DIR = PROJECT_ROOT / "reports" / "pdf"
+
+
+class PDFInfo(BaseModel):
+    filename: str
+    created_at: str
+    size: int
+
+
+@app.get("/api/reports/pdf", response_model=list[PDFInfo])
+async def list_pdf_reports(limit: int = 10):
+    """List available PDF reports, newest first"""
+    if not PDF_DIR.exists():
+        return []
+
+    pdf_files = sorted(PDF_DIR.glob("backtest_report_*.pdf"), reverse=True)
+
+    return [
+        PDFInfo(
+            filename=f.name,
+            created_at=datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+            size=f.stat().st_size,
+        )
+        for f in pdf_files[:limit]
+    ]
+
+
+@app.get("/api/reports/pdf/latest")
+async def get_latest_pdf():
+    """Get the most recent PDF report"""
+    if not PDF_DIR.exists():
+        raise HTTPException(status_code=404, detail="No PDF reports found")
+
+    pdf_files = sorted(PDF_DIR.glob("backtest_report_*.pdf"), reverse=True)
+    if not pdf_files:
+        raise HTTPException(status_code=404, detail="No PDF reports found")
+
+    latest = pdf_files[0]
+    return FileResponse(
+        path=latest,
+        filename=latest.name,
+        media_type="application/pdf",
+    )
+
+
+@app.get("/api/reports/pdf/{filename}")
+async def download_pdf(filename: str):
+    """Download a specific PDF report"""
+    if ".." in filename or "/" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    file_path = PDF_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/pdf",
+    )
 
 
 # =========================================================================
