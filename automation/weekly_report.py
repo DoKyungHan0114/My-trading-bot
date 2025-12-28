@@ -77,11 +77,38 @@ def calculate_weekly_stats(trades: list[dict]) -> dict:
             "best_trade": 0,
             "worst_trade": 0,
             "avg_pnl": 0,
+            "avg_holding_mins": 0,
+            "avg_slippage": 0,
+            "best_trade_detail": None,
+            "worst_trade_detail": None,
         }
 
     pnls = [t.get("realized_pnl_usd", 0) or 0 for t in trades]
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
+
+    # Calculate average holding time
+    holding_times = [t.get("holding_minutes") for t in trades if t.get("holding_minutes") is not None]
+    avg_holding = sum(holding_times) / len(holding_times) if holding_times else 0
+
+    # Calculate average slippage
+    slippages = [abs(t.get("slippage", 0) or 0) for t in trades]
+    avg_slippage = sum(slippages) / len(slippages) if slippages else 0
+
+    # Find best and worst trade details
+    best_trade_detail = None
+    worst_trade_detail = None
+
+    if pnls:
+        best_pnl = max(pnls)
+        worst_pnl = min(pnls)
+
+        for t in trades:
+            pnl = t.get("realized_pnl_usd", 0) or 0
+            if pnl == best_pnl and best_trade_detail is None:
+                best_trade_detail = t
+            if pnl == worst_pnl and worst_trade_detail is None:
+                worst_trade_detail = t
 
     return {
         "total_trades": len(trades),
@@ -92,7 +119,69 @@ def calculate_weekly_stats(trades: list[dict]) -> dict:
         "best_trade": max(pnls) if pnls else 0,
         "worst_trade": min(pnls) if pnls else 0,
         "avg_pnl": sum(pnls) / len(pnls) if pnls else 0,
+        "avg_holding_mins": avg_holding,
+        "avg_slippage": avg_slippage,
+        "best_trade_detail": best_trade_detail,
+        "worst_trade_detail": worst_trade_detail,
     }
+
+
+def format_holding_time(minutes: float | None) -> str:
+    """Format holding time in human readable format."""
+    if minutes is None or minutes == 0:
+        return "N/A"
+    minutes = int(minutes)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m"
+
+
+def format_trade_time(timestamp_str: str) -> str:
+    """Extract time from ISO timestamp in ET."""
+    try:
+        if "T" in timestamp_str:
+            dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            dt_et = dt.astimezone(ET)
+            return dt_et.strftime("%m/%d %H:%M")
+    except Exception:
+        pass
+    return "??/?? ??:??"
+
+
+def format_trade_summary(trade: dict | None, label: str) -> str:
+    """Format a single trade for weekly summary."""
+    if not trade:
+        return f"{label}: N/A"
+
+    pnl = trade.get("realized_pnl_usd", 0) or 0
+    entry_price = trade.get("entry_price")
+    fill_price = trade.get("fill_price", 0)
+    rsi = trade.get("rsi_value")
+    reason = trade.get("signal_reason", "")
+    timestamp = trade.get("timestamp_utc", "")
+    holding_mins = trade.get("holding_minutes")
+
+    time_str = format_trade_time(timestamp)
+
+    lines = [f"**{label}**: ${pnl:+.2f}"]
+
+    detail_parts = []
+    if entry_price:
+        detail_parts.append(f"${entry_price:.2f}→${fill_price:.2f}")
+    if rsi is not None:
+        detail_parts.append(f"RSI:{rsi:.0f}")
+    if holding_mins:
+        detail_parts.append(format_holding_time(holding_mins))
+
+    if detail_parts:
+        lines.append(f"└ {' | '.join(detail_parts)}")
+
+    if reason:
+        lines.append(f"└ {reason[:30]}")
+
+    return "\n".join(lines)
 
 
 def create_weekly_embed(
@@ -159,18 +248,13 @@ def create_weekly_embed(
                 "inline": True,
             },
             {
-                "name": "🏆 Best Trade",
-                "value": f"${stats['best_trade']:+.2f}",
-                "inline": True,
-            },
-            {
-                "name": "💔 Worst Trade",
-                "value": f"${stats['worst_trade']:+.2f}",
-                "inline": True,
-            },
-            {
-                "name": "📊 Avg P&L per Trade",
+                "name": "📊 Avg P&L",
                 "value": f"${stats['avg_pnl']:+.2f}",
+                "inline": True,
+            },
+            {
+                "name": "⏱️ Avg Holding",
+                "value": format_holding_time(stats.get('avg_holding_mins', 0)),
                 "inline": True,
             },
             {
@@ -183,6 +267,29 @@ def create_weekly_embed(
             "text": "TQQQ RSI(2) Paper Trading | Weekly Summary",
         },
     }
+
+    # Add best/worst trade details
+    if stats.get("best_trade_detail") or stats.get("worst_trade_detail"):
+        trade_review_lines = []
+
+        if stats.get("best_trade_detail"):
+            trade_review_lines.append(format_trade_summary(stats["best_trade_detail"], "🏆 Best"))
+
+        if stats.get("worst_trade_detail"):
+            trade_review_lines.append("")
+            trade_review_lines.append(format_trade_summary(stats["worst_trade_detail"], "💔 Worst"))
+
+        # Add average slippage if notable
+        avg_slip = stats.get("avg_slippage", 0)
+        if avg_slip > 0.001:  # > 0.1%
+            trade_review_lines.append("")
+            trade_review_lines.append(f"📉 평균 슬리피지: {avg_slip*100:.2f}%")
+
+        embed["fields"].append({
+            "name": "📝 Trade Review",
+            "value": "\n".join(trade_review_lines),
+            "inline": False,
+        })
 
     # Add weekly uptime summary
     if weekly_uptime:

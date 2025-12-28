@@ -70,6 +70,15 @@ class TradeLog:
         realized_pnl_usd: Optional[float] = None,
         holding_period_days: Optional[int] = None,
         exchange_rate: Optional[float] = None,
+        # New indicator fields for trade review
+        rsi_value: Optional[float] = None,
+        vwap_value: Optional[float] = None,
+        sma_value: Optional[float] = None,
+        day_high: Optional[float] = None,
+        day_low: Optional[float] = None,
+        holding_minutes: Optional[int] = None,
+        entry_price: Optional[float] = None,  # For exit trades, track entry
+        entry_time: Optional[str] = None,  # For exit trades, track entry time
     ):
         self.trade_id = str(uuid.uuid4())
         self.timestamp_utc = datetime.utcnow()
@@ -86,6 +95,16 @@ class TradeLog:
         self.realized_pnl_usd = realized_pnl_usd
         self.holding_period_days = holding_period_days
 
+        # Indicator values at trade time
+        self.rsi_value = rsi_value
+        self.vwap_value = vwap_value
+        self.sma_value = sma_value
+        self.day_high = day_high
+        self.day_low = day_low
+        self.holding_minutes = holding_minutes
+        self.entry_price = entry_price
+        self.entry_time = entry_time
+
         # Exchange rate
         self.exchange_rate = exchange_rate or ExchangeRateService().get_rate(self.timestamp_utc)
 
@@ -98,6 +117,11 @@ class TradeLog:
         self.realized_pnl_aud = (
             realized_pnl_usd * self.exchange_rate if realized_pnl_usd else None
         )
+
+        # Calculate position in day's range (0% = low, 100% = high)
+        self.day_range_pct = None
+        if day_high and day_low and day_high > day_low:
+            self.day_range_pct = (fill_price - day_low) / (day_high - day_low) * 100
 
     @property
     def timestamp_aest(self) -> datetime:
@@ -131,6 +155,16 @@ class TradeLog:
             "strategy": STRATEGY_NAME,
             "signal_reason": self.signal_reason,
             "order_id_alpaca": self.order_id_alpaca,
+            # Indicator values for trade review
+            "rsi_value": self.rsi_value,
+            "vwap_value": self.vwap_value,
+            "sma_value": self.sma_value,
+            "day_high": self.day_high,
+            "day_low": self.day_low,
+            "day_range_pct": self.day_range_pct,
+            "holding_minutes": self.holding_minutes,
+            "entry_price": self.entry_price,
+            "entry_time": self.entry_time,
         }
 
 
@@ -184,6 +218,15 @@ class TradeLogger:
         order_id_alpaca: str = "",
         realized_pnl_usd: Optional[float] = None,
         holding_period_days: Optional[int] = None,
+        # Indicator values for trade review
+        rsi_value: Optional[float] = None,
+        vwap_value: Optional[float] = None,
+        sma_value: Optional[float] = None,
+        day_high: Optional[float] = None,
+        day_low: Optional[float] = None,
+        holding_minutes: Optional[int] = None,
+        entry_price: Optional[float] = None,
+        entry_time: Optional[str] = None,
     ) -> TradeLog:
         """
         Log a trade.
@@ -204,6 +247,14 @@ class TradeLogger:
             order_id_alpaca=order_id_alpaca,
             realized_pnl_usd=realized_pnl_usd,
             holding_period_days=holding_period_days,
+            rsi_value=rsi_value,
+            vwap_value=vwap_value,
+            sma_value=sma_value,
+            day_high=day_high,
+            day_low=day_low,
+            holding_minutes=holding_minutes,
+            entry_price=entry_price,
+            entry_time=entry_time,
         )
 
         self._trades.append(trade.to_dict())

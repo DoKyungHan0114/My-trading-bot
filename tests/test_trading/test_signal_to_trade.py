@@ -108,7 +108,19 @@ class TestSignalToTradeExecution:
             bot.trade_logger = mock_logger
             bot.audit_trail = mock_audit
 
-            bot._execute_buy(current_price=45.0, reason="Test buy")
+            # Create a mock signal
+            from strategy.signals import Signal
+            from config.constants import SignalType
+            mock_signal = Signal(
+                timestamp=datetime.utcnow(),
+                signal_type=SignalType.BUY,
+                symbol="TQQQ",
+                price=45.0,
+                rsi=25.0,
+                reason="Test buy",
+            )
+
+            bot._execute_buy(mock_signal)
 
             # Verify trade was logged
             mock_logger.log_trade.assert_called_once()
@@ -147,8 +159,20 @@ class TestSignalToTradeExecution:
             bot.entry_price = 40.0
             bot.entry_date = datetime.utcnow()
 
+            # Create a mock signal
+            from strategy.signals import Signal
+            from config.constants import SignalType
+            mock_signal = Signal(
+                timestamp=datetime.utcnow(),
+                signal_type=SignalType.SELL,
+                symbol="TQQQ",
+                price=50.0,
+                rsi=80.0,
+                reason="Test sell",
+            )
+
             position = {"quantity": 100.0, "avg_entry_price": 40.0}
-            bot._execute_sell(position, reason="Test sell")
+            bot._execute_sell(position, mock_signal)
 
             # Verify trade was logged with P&L
             mock_logger.log_trade.assert_called_once()
@@ -225,7 +249,19 @@ class TestHedgeExecution:
             bot.trade_logger = mock_logger
             bot.audit_trail = mock_audit
 
-            bot._execute_hedge_buy(current_price=20.0, reason="Test hedge")
+            # Create a mock signal
+            from strategy.signals import Signal
+            from config.constants import SignalType
+            mock_signal = Signal(
+                timestamp=datetime.utcnow(),
+                signal_type=SignalType.HEDGE_BUY,
+                symbol="SQQQ",
+                price=20.0,
+                rsi=92.0,
+                reason="Test hedge",
+            )
+
+            bot._execute_hedge_buy(current_price=20.0, signal=mock_signal)
 
             # Verify trade was logged
             mock_logger.log_trade.assert_called_once()
@@ -264,8 +300,20 @@ class TestHedgeExecution:
             bot.hedge_entry_price = 18.0
             bot.hedge_entry_date = datetime.utcnow()
 
+            # Create a mock signal
+            from strategy.signals import Signal
+            from config.constants import SignalType
+            mock_signal = Signal(
+                timestamp=datetime.utcnow(),
+                signal_type=SignalType.HEDGE_SELL,
+                symbol="SQQQ",
+                price=22.0,
+                rsi=55.0,
+                reason="Test hedge exit",
+            )
+
             position = {"quantity": 50.0, "avg_entry_price": 18.0}
-            bot._execute_hedge_sell(position, reason="Test hedge exit")
+            bot._execute_hedge_sell(position, mock_signal)
 
             # Verify trade was logged
             mock_logger.log_trade.assert_called_once()

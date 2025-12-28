@@ -72,6 +72,151 @@ def calculate_daily_pnl(trades: list[dict]) -> tuple[float, int, int]:
     return total_pnl, wins, losses
 
 
+def format_holding_time(minutes: int | None) -> str:
+    """Format holding time in human readable format."""
+    if minutes is None:
+        return "N/A"
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m"
+
+
+def format_trade_time(timestamp_str: str) -> str:
+    """Extract time from ISO timestamp in ET."""
+    try:
+        # Parse UTC timestamp
+        if "T" in timestamp_str:
+            dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            dt_et = dt.astimezone(ET)
+            return dt_et.strftime("%H:%M")
+    except Exception:
+        pass
+    return "??:??"
+
+
+def format_detailed_trades(trades: list[dict], max_trades: int = 3) -> str:
+    """
+    Format trades with detailed review information.
+
+    Groups BUY/SELL pairs and shows indicators, holding time, etc.
+    """
+    if not trades:
+        return ""
+
+    lines = []
+    trade_num = 0
+
+    # Process trades (show most recent first, limit to max_trades complete trades)
+    processed = 0
+    i = len(trades) - 1
+
+    while i >= 0 and processed < max_trades:
+        t = trades[i]
+        side = t.get("side", "?")
+        symbol = t.get("symbol", "TQQQ")
+        qty = t.get("quantity", 0)
+        fill_price = t.get("fill_price", 0)
+        pnl = t.get("realized_pnl_usd")
+        reason = t.get("signal_reason", "")
+        rsi = t.get("rsi_value")
+        vwap = t.get("vwap_value")
+        slippage = t.get("slippage", 0)
+        holding_mins = t.get("holding_minutes")
+        entry_price = t.get("entry_price")
+        entry_time = t.get("entry_time")
+        day_range_pct = t.get("day_range_pct")
+        timestamp = t.get("timestamp_utc", "")
+
+        trade_num += 1
+
+        # Format trade header
+        if side == "SELL" and pnl is not None:
+            # This is an exit trade with P&L
+            pnl_pct = (pnl / (entry_price * qty) * 100) if entry_price and qty else 0
+            pnl_emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+
+            lines.append(f"**Trade #{trade_num}** {pnl_emoji} **${pnl:+.2f}** ({pnl_pct:+.1f}%)")
+            lines.append("━━━━━━━━━━━━━━━━")
+
+            # Entry info (if available)
+            if entry_price and entry_time:
+                entry_time_str = format_trade_time(entry_time)
+                lines.append(f"📈 진입: ${entry_price:.2f} @ {entry_time_str} ET")
+
+            # Exit info
+            exit_time_str = format_trade_time(timestamp)
+            exit_line = f"📉 청산: ${fill_price:.2f} @ {exit_time_str} ET"
+            lines.append(exit_line)
+
+            # Indicator at exit
+            indicator_parts = []
+            if rsi is not None:
+                indicator_parts.append(f"RSI: {rsi:.1f}")
+            if vwap is not None:
+                indicator_parts.append(f"VWAP: ${vwap:.2f}")
+            if indicator_parts:
+                lines.append(f"   └ {' | '.join(indicator_parts)}")
+
+            # Reason
+            if reason:
+                lines.append(f"   └ 사유: {reason}")
+
+            # Holding time & slippage
+            meta_parts = []
+            if holding_mins is not None:
+                meta_parts.append(f"보유: {format_holding_time(holding_mins)}")
+            if slippage and abs(slippage) > 0.0001:
+                meta_parts.append(f"슬리피지: {slippage*100:.2f}%")
+            if day_range_pct is not None:
+                meta_parts.append(f"일중위치: {day_range_pct:.0f}%")
+            if meta_parts:
+                lines.append(f"📊 {' | '.join(meta_parts)}")
+
+            processed += 1
+
+        elif side == "BUY":
+            # Entry trade (no exit yet)
+            lines.append(f"**Trade #{trade_num}** 📥 진입")
+            lines.append("━━━━━━━━━━━━━━━━")
+
+            time_str = format_trade_time(timestamp)
+            lines.append(f"📈 매수: {qty:.2f} {symbol} @ ${fill_price:.2f} ({time_str} ET)")
+
+            # Indicators at entry
+            indicator_parts = []
+            if rsi is not None:
+                indicator_parts.append(f"RSI: {rsi:.1f}")
+            if vwap is not None:
+                indicator_parts.append(f"VWAP: ${vwap:.2f}")
+            if indicator_parts:
+                lines.append(f"   └ {' | '.join(indicator_parts)}")
+
+            if reason:
+                lines.append(f"   └ 사유: {reason}")
+
+            if day_range_pct is not None:
+                lines.append(f"📊 일중위치: {day_range_pct:.0f}% (저가=0%, 고가=100%)")
+
+            processed += 1
+
+        lines.append("")  # Empty line between trades
+        i -= 1
+
+    # Trim trailing empty lines
+    while lines and lines[-1] == "":
+        lines.pop()
+
+    result = "\n".join(lines)
+
+    # Discord embed field limit is 1024 chars
+    if len(result) > 1000:
+        result = result[:997] + "..."
+
+    return result
+
+
 def create_daily_embed(
     date: str,
     equity: float,
@@ -144,25 +289,17 @@ def create_daily_embed(
         },
     }
 
-    # Add individual trade details if any
+    # Add detailed trade review if any trades
     if trades:
-        trade_details = []
-        for t in trades[-5:]:  # Last 5 trades
-            side = t.get("side", "?")
-            qty = t.get("quantity", 0)
-            price = t.get("fill_price", 0)
-            pnl = t.get("realized_pnl_usd")
+        # Group trades into entry/exit pairs for better review
+        trade_blocks = format_detailed_trades(trades)
 
-            if pnl is not None:
-                trade_details.append(f"• {side} {qty:.2f} @ ${price:.2f} → ${pnl:+.2f}")
-            else:
-                trade_details.append(f"• {side} {qty:.2f} @ ${price:.2f}")
-
-        embed["fields"].append({
-            "name": "📝 Trade Details",
-            "value": "\n".join(trade_details) or "None",
-            "inline": False,
-        })
+        if trade_blocks:
+            embed["fields"].append({
+                "name": "📝 Trade Details",
+                "value": trade_blocks,
+                "inline": False,
+            })
 
     # Add bot uptime info
     if uptime_stats:

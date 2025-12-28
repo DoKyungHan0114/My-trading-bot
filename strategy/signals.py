@@ -25,6 +25,11 @@ class Signal:
     rsi: float
     reason: str
     strength: float = 1.0  # Signal strength 0-1
+    # Additional indicator values for trade review
+    vwap: Optional[float] = None
+    sma: Optional[float] = None
+    day_high: Optional[float] = None
+    day_low: Optional[float] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -36,6 +41,10 @@ class Signal:
             "rsi": self.rsi,
             "reason": self.reason,
             "strength": self.strength,
+            "vwap": self.vwap,
+            "sma": self.sma,
+            "day_high": self.day_high,
+            "day_low": self.day_low,
         }
 
 
@@ -218,6 +227,10 @@ class SignalGenerator:
             rsi=latest["rsi"],
             reason=reason,
             strength=strength,
+            vwap=latest.get("vwap") if "vwap" in latest else None,
+            sma=latest.get("sma") if "sma" in latest else None,
+            day_high=latest.get("high"),
+            day_low=latest.get("low"),
         )
 
     def generate_exit_signal(
@@ -248,6 +261,15 @@ class SignalGenerator:
         latest = df.iloc[-1]
         timestamp = df.index[-1]
 
+        # Helper to get indicator values
+        def get_indicators():
+            return {
+                "vwap": latest.get("vwap") if "vwap" in latest else None,
+                "sma": latest.get("sma") if "sma" in latest else None,
+                "day_high": latest.get("high"),
+                "day_low": latest.get("low"),
+            }
+
         # Exit condition 1: Close above previous high
         if not pd.isna(latest["prev_high"]) and latest["close"] > latest["prev_high"]:
             reason = f"Close ${latest['close']:.2f} > Previous High ${latest['prev_high']:.2f}"
@@ -260,6 +282,7 @@ class SignalGenerator:
                 price=latest["close"],
                 rsi=latest["rsi"],
                 reason=reason,
+                **get_indicators(),
             )
 
         # Exit condition 2: RSI overbought
@@ -274,6 +297,7 @@ class SignalGenerator:
                 price=latest["close"],
                 rsi=latest["rsi"],
                 reason=reason,
+                **get_indicators(),
             )
 
         # Exit condition 3: Stop loss
@@ -290,6 +314,7 @@ class SignalGenerator:
                 rsi=latest["rsi"],
                 reason=reason,
                 strength=0.0,  # Forced exit
+                **get_indicators(),
             )
 
         return None
@@ -397,6 +422,10 @@ class SignalGenerator:
             rsi=latest["rsi"],
             reason=reason,
             strength=strength,
+            vwap=latest.get("vwap") if "vwap" in latest else None,
+            sma=latest.get(sma_col) if sma_col in latest else None,
+            day_high=latest.get("high"),
+            day_low=latest.get("low"),
         )
 
     def generate_short_exit_signal(
@@ -446,6 +475,15 @@ class SignalGenerator:
             target_symbol = self.symbol
             exit_label = "COVER"
 
+        # Helper to get indicator values
+        def get_indicators():
+            return {
+                "vwap": latest.get("vwap") if "vwap" in latest else None,
+                "sma": latest.get("sma") if "sma" in latest else None,
+                "day_high": latest.get("high"),
+                "day_low": latest.get("low"),
+            }
+
         # Exit condition 1: RSI oversold (mean reversion complete)
         if latest["rsi"] <= self.rsi_oversold_short:
             reason = f"{exit_label}: TQQQ RSI({self.rsi_period})={latest['rsi']:.1f} <= {self.rsi_oversold_short}"
@@ -458,6 +496,7 @@ class SignalGenerator:
                 price=current_hedge_price if is_hedge and current_hedge_price else latest["close"],
                 rsi=latest["rsi"],
                 reason=reason,
+                **get_indicators(),
             )
 
         # Exit condition 2: Stop loss
@@ -475,6 +514,7 @@ class SignalGenerator:
                     rsi=latest["rsi"],
                     reason=reason,
                     strength=0.0,
+                    **get_indicators(),
                 )
         elif not is_hedge:
             # For direct short: stop loss if TQQQ price rises
@@ -490,6 +530,7 @@ class SignalGenerator:
                     rsi=latest["rsi"],
                     reason=reason,
                     strength=0.0,
+                    **get_indicators(),
                 )
 
         # Exit condition 3: Momentum shift (for direct shorts only)
@@ -505,6 +546,7 @@ class SignalGenerator:
                         price=latest["close"],
                         rsi=latest["rsi"],
                         reason=reason,
+                        **get_indicators(),
                     )
 
         return None

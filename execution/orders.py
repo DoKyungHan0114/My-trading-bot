@@ -55,6 +55,25 @@ class Order:
                 return (self.limit_price - self.fill_price) / self.limit_price
         return 0.0
 
+    @property
+    def is_partially_filled(self) -> bool:
+        """Check if order is partially filled."""
+        return self.status == OrderStatus.PARTIALLY_FILLED
+
+    @property
+    def remaining_quantity(self) -> float:
+        """Get remaining quantity to be filled."""
+        if self.filled_quantity is None:
+            return self.quantity
+        return max(0, self.quantity - self.filled_quantity)
+
+    @property
+    def fill_ratio(self) -> float:
+        """Get the ratio of filled quantity to total quantity."""
+        if self.filled_quantity is None or self.quantity == 0:
+            return 0.0
+        return self.filled_quantity / self.quantity
+
     def fill(
         self,
         price: float,
@@ -73,6 +92,29 @@ class Order:
         self.fill_price = price
         self.filled_quantity = quantity or self.quantity
         self.filled_at = timestamp or datetime.utcnow()
+
+    def partial_fill(
+        self,
+        price: float,
+        filled_quantity: float,
+        timestamp: Optional[datetime] = None,
+    ) -> None:
+        """
+        Mark order as partially filled.
+
+        Args:
+            price: Average fill price so far
+            filled_quantity: Total quantity filled so far
+            timestamp: Fill timestamp
+        """
+        if filled_quantity >= self.quantity:
+            # Actually fully filled
+            self.fill(price, filled_quantity, timestamp)
+        else:
+            self.status = OrderStatus.PARTIALLY_FILLED
+            self.fill_price = price
+            self.filled_quantity = filled_quantity
+            self.filled_at = timestamp or datetime.utcnow()
 
     def cancel(self) -> None:
         """Mark order as cancelled."""
