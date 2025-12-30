@@ -33,10 +33,30 @@ jobs:
 
       - name: Build with Cloud Build
         run: |
-          gcloud builds submit \
+          # Submit build asynchronously to avoid log streaming permission issues
+          BUILD_ID=$(gcloud builds submit \
             --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --project=${{ env.PROJECT_ID }} \
-            --quiet
+            --async \
+            --format='value(id)')
+
+          echo "Build ID: $BUILD_ID"
+
+          # Wait for build to complete
+          while true; do
+            STATUS=$(gcloud builds describe $BUILD_ID --project=${{ env.PROJECT_ID }} --format='value(status)')
+            echo "Build status: $STATUS"
+
+            if [ "$STATUS" = "SUCCESS" ]; then
+              echo "Build completed successfully!"
+              break
+            elif [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "TIMEOUT" ] || [ "$STATUS" = "CANCELLED" ]; then
+              echo "Build failed with status: $STATUS"
+              exit 1
+            fi
+
+            sleep 10
+          done
 
       - name: Tag as latest
         run: |
