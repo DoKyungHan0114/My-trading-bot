@@ -40,3 +40,6 @@ data/cache/
 
 # Test files
 test_strategy_reload.py
+
+# Rust
+rust/target

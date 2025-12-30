@@ -49,8 +49,8 @@ class ScheduleConfig:
 
 
 DEFAULT_SCHEDULE = ScheduleConfig(
-    # Run at 11:00 AM and 2:30 PM ET
-    analysis_times=[(11, 0), (14, 30)],
+    # Run at market open (9:00 AM) and market close (4:30 PM) ET
+    analysis_times=[(9, 0), (16, 30)],
     auto_apply=False,
     min_confidence=0.5,
 )
@@ -164,6 +164,23 @@ class AutomationScheduler:
 
         return None
 
+    def _get_analysis_purpose(self) -> tuple[str, str]:
+        """
+        Determine analysis purpose based on current time.
+
+        Returns:
+            Tuple of (purpose, emoji)
+        """
+        now = datetime.now(ET)
+        hour = now.hour
+
+        if hour < 10:
+            return "Pre-Market Check", "🌅"
+        elif hour >= 16:
+            return "Post-Market Analysis", "🌆"
+        else:
+            return "Intraday Check", "☀️"
+
     def run_analysis(self) -> Optional[AnalysisResult]:
         """
         Run a single analysis cycle.
@@ -171,10 +188,19 @@ class AutomationScheduler:
         Returns:
             Analysis result or None on error
         """
+        purpose, emoji = self._get_analysis_purpose()
+
         logger.info("=" * 60)
-        logger.info("Starting scheduled analysis")
+        logger.info(f"Starting {purpose}")
         logger.info(f"Time: {datetime.now(ET).strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info("=" * 60)
+
+        # Discord: Analysis starting
+        if self.discord.enabled:
+            self.discord.send_message(
+                f"{emoji} **{purpose} Started**\n"
+                f"Time: {datetime.now(ET).strftime('%Y-%m-%d %H:%M ET')}"
+            )
 
         try:
             # Generate report
@@ -196,6 +222,30 @@ class AutomationScheduler:
             if result:
                 logger.info(f"Analysis complete: {result.summary}")
 
+                # Discord: Send analysis result
+                if self.discord.enabled:
+                    mods_text = ""
+                    if result.modifications:
+                        mods_text = "\n**Modifications:**\n"
+                        for mod in result.modifications:
+                            mods_text += f"• `{mod.parameter}`: {mod.old_value} → {mod.new_value}\n"
+                    else:
+                        mods_text = "\n_No parameter changes suggested_"
+
+                    applied_text = ""
+                    if self.config.auto_apply and result.modifications:
+                        if result.confidence >= self.config.min_confidence:
+                            applied_text = "\n✅ **Changes Applied**"
+                        else:
+                            applied_text = f"\n⏸️ _Confidence {result.confidence:.0%} below threshold {self.config.min_confidence:.0%}_"
+
+                    self.discord.send_message(
+                        f"{emoji} **{purpose} Complete**\n"
+                        f"**Summary:** {result.summary}\n"
+                        f"**Confidence:** {result.confidence:.0%}"
+                        f"{mods_text}{applied_text}"
+                    )
+
                 # Log session to Firestore if available
                 if self.firestore and report.recent_performance:
                     perf = report.recent_performance
@@ -216,6 +266,13 @@ class AutomationScheduler:
 
         except Exception as e:
             logger.error(f"Analysis failed: {e}", exc_info=True)
+            # Discord: Send error notification
+            if self.discord.enabled:
+                self.discord.send_error_alert(
+                    error_type="Analysis Failed",
+                    message=str(e),
+                    context=f"{purpose} at {datetime.now(ET).strftime('%H:%M ET')}",
+                )
             return None
 
     def run_once(self) -> Optional[AnalysisResult]:
@@ -323,7 +380,7 @@ def run_scheduler(
     )
 
     config = ScheduleConfig(
-        analysis_times=[(11, 0), (14, 30)],
+        analysis_times=[(9, 0), (16, 30)],  # Market open & close
         auto_apply=auto_apply,
         min_confidence=0.5,
         dry_run=dry_run,

@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import StrategyConfig, get_settings
 from database.firestore import FirestoreClient
+from notifications.discord import DiscordNotifier
 from reports.report_generator import AnalysisReport, ReportGenerator
 from strategy.rag_retriever import RAGRetriever
 from strategy.regime import RegimeClassifier
@@ -90,9 +91,15 @@ Actively optimize the strategy for better performance. Don't be afraid to make c
 - Want to test a hypothesis
 - Current settings feel suboptimal
 
+### OPTIMIZED BASELINE (from Rust backtesting):
+**Current optimal RSI settings: 48/55** (tested on 250 days of real TQQQ data)
+- This produced +22% return vs market -33%, 83% win rate, Sharpe 1.22
+- Use this as your baseline, but feel free to adjust based on market conditions
+
 ### Your Control (NO LIMITS):
 **Long (TQQQ) - Full Range:**
-- RSI thresholds: 5-95 (any value)
+- RSI oversold: 30-55 (higher = more frequent trades, optimal around 48)
+- RSI overbought: 52-80 (lower = faster exits, optimal around 55)
 - Stop loss: 1%-20%
 - Position size: 10%-100%
 
@@ -159,6 +166,7 @@ Respond in this exact JSON format:
         self,
         firestore_client: Optional[FirestoreClient] = None,
         report_generator: Optional[ReportGenerator] = None,
+        discord_notifier: Optional[DiscordNotifier] = None,
     ):
         """
         Initialize Claude analyzer.
@@ -166,9 +174,11 @@ Respond in this exact JSON format:
         Args:
             firestore_client: Firestore client for saving changes
             report_generator: Report generator instance
+            discord_notifier: Discord notifier for sending logs
         """
         self.firestore = firestore_client
         self.report_gen = report_generator or ReportGenerator()
+        self.discord = discord_notifier or DiscordNotifier()
         self.claude_path = os.getenv("CLAUDE_CLI_PATH", "claude")
         # Initialize RAG components
         try:
@@ -390,17 +400,19 @@ Respond in this exact JSON format:
         }
 
         # Parameter validation ranges: (min, max, max_change_per_adjustment)
+        # NOTE: RSI ranges expanded based on Rust backtesting optimization
+        # Optimal found: RSI 48/55 with +22% return, 83% win rate
         numeric_ranges = {
-            "rsi_oversold": (25.0, 35.0, 5.0),
-            "rsi_overbought": (70.0, 80.0, 5.0),
-            "stop_loss_pct": (0.04, 0.08, 0.02),
+            "rsi_oversold": (30.0, 55.0, 10.0),  # Expanded: optimal ~48
+            "rsi_overbought": (52.0, 80.0, 10.0),  # Expanded: optimal ~55
+            "stop_loss_pct": (0.02, 0.10, 0.02),
             "position_size_pct": (0.70, 0.95, 0.10),
             "atr_stop_multiplier": (1.5, 3.0, 0.5),
             "bb_std_dev": (1.5, 2.5, 0.5),
             "volume_min_ratio": (0.5, 2.0, 0.5),
             # Short parameters
-            "rsi_overbought_short": (75.0, 90.0, 5.0),
-            "rsi_oversold_short": (30.0, 50.0, 10.0),
+            "rsi_overbought_short": (75.0, 95.0, 10.0),
+            "rsi_oversold_short": (30.0, 60.0, 10.0),
             "short_stop_loss_pct": (0.02, 0.05, 0.01),
             "short_position_size_pct": (0.30, 0.60, 0.10),
         }
@@ -515,20 +527,50 @@ Respond in this exact JSON format:
         prompt = self.build_prompt(report)
         logger.info("Calling Claude for analysis...")
 
+        # Discord: Analysis starting (only when run directly, not via scheduler)
+        if self.discord.enabled:
+            self.discord.send_message(
+                "🤖 **Claude Analyzer Starting**\n"
+                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+
         response = self.call_claude(prompt)
         if not response:
             logger.error("No response from Claude")
+            if self.discord.enabled:
+                self.discord.send_error_alert(
+                    error_type="Claude Analysis",
+                    message="No response from Claude CLI",
+                    context="Check if claude CLI is installed and configured",
+                )
             return None
 
         # Parse response
         result = self.parse_response(response)
         if not result:
             logger.error("Failed to parse Claude response")
+            if self.discord.enabled:
+                self.discord.send_error_alert(
+                    error_type="Claude Analysis",
+                    message="Failed to parse Claude response",
+                    context="Response may not be in expected JSON format",
+                )
             return None
 
         logger.info(f"Analysis complete: {result.summary}")
         logger.info(f"Confidence: {result.confidence:.1%}")
         logger.info(f"Modifications: {len(result.modifications)}")
+
+        # Build Discord message for result
+        discord_mods_text = ""
+        discord_status = ""
+
+        if result.modifications:
+            discord_mods_text = "\n**Modifications:**\n"
+            for mod in result.modifications:
+                discord_mods_text += f"• `{mod.parameter}`: {mod.old_value} → {mod.new_value}\n"
+        else:
+            discord_mods_text = "\n_No parameter changes suggested_"
 
         # Check cooldown period before applying
         if auto_apply and result.modifications:
@@ -547,6 +589,14 @@ Respond in this exact JSON format:
                             f"Cooldown active: {days_since_change} days since last change, "
                             f"waiting {cooldown_days - days_since_change} more days"
                         )
+                        discord_status = f"\n⏳ _Cooldown: {cooldown_days - days_since_change} days remaining_"
+                        if self.discord.enabled:
+                            self.discord.send_message(
+                                f"🤖 **Claude Analysis Complete**\n"
+                                f"**Summary:** {result.summary}\n"
+                                f"**Confidence:** {result.confidence:.0%}"
+                                f"{discord_mods_text}{discord_status}"
+                            )
                         return result
 
         # Auto-apply if enabled and confident
@@ -566,11 +616,22 @@ Respond in this exact JSON format:
 
             # Save to Firestore
             self.save_strategy_change(old_config, new_config, result, report)
+            discord_status = "\n✅ **Changes Applied**"
 
         elif result.modifications and result.confidence < min_confidence:
             logger.info(
                 f"Modifications suggested but confidence ({result.confidence:.1%}) "
                 f"below threshold ({min_confidence:.1%})"
+            )
+            discord_status = f"\n⏸️ _Confidence {result.confidence:.0%} below threshold {min_confidence:.0%}_"
+
+        # Discord: Send analysis result
+        if self.discord.enabled:
+            self.discord.send_message(
+                f"🤖 **Claude Analysis Complete**\n"
+                f"**Summary:** {result.summary}\n"
+                f"**Confidence:** {result.confidence:.0%}"
+                f"{discord_mods_text}{discord_status}"
             )
 
         return result

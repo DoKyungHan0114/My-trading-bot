@@ -305,8 +305,20 @@ PROJECT_ROOT = Path(__file__).parent
 # Available commands configuration
 COMMANDS = {
     "backtest": {
-        "name": "Run Backtest",
-        "description": "Run backtest with current strategy",
+        "name": "Backtest + Claude AI",
+        "description": "Rust backtest + Claude strategy analysis",
+        "command": ["./run_backtest_rust.sh", "365", "100000"],
+        "cwd": PROJECT_ROOT,
+    },
+    "backtest_quick": {
+        "name": "Quick Backtest (Rust)",
+        "description": "Fast backtest only, no AI analysis",
+        "command": ["./rust/target/release/backtest-engine", "-f", "data/tqqq_daily.csv", "--capital", "100000", "--rsi-oversold", "48", "--rsi-overbought", "55", "--output", "text"],
+        "cwd": PROJECT_ROOT,
+    },
+    "backtest_python": {
+        "name": "Backtest (Python)",
+        "description": "Original Python backtest + Claude",
         "command": ["./run_backtest.sh"],
         "cwd": PROJECT_ROOT,
     },

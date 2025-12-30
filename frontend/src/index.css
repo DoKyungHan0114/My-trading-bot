@@ -51,6 +51,35 @@ body {
   color: var(--text-secondary);
 }
 
+.health-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+}
+
+.health-dot.ok {
+  background-color: var(--accent-green);
+  box-shadow: 0 0 4px var(--accent-green);
+}
+
+.health-dot.err {
+  background-color: var(--accent-red);
+}
+
+.health-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 8px;
+}
+
 .main-container {
   display: flex;
   flex: 1;
@@ -85,16 +114,37 @@ body {
 
 .command-btn {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 12px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
   background-color: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: left;
+}
+
+.command-key {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.command-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .command-btn:hover:not(:disabled) {
@@ -125,7 +175,10 @@ body {
 
 .clear-btn {
   margin-top: 16px;
-  padding: 10px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background-color: transparent;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -133,6 +186,12 @@ body {
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.clear-btn .command-key {
+  width: auto;
+  padding: 2px 6px;
+  font-size: 10px;
 }
 
 .clear-btn:hover {

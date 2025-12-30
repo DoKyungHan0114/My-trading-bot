@@ -15,6 +15,60 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def get_strategy_changes_for_pdf(limit: int = 10) -> list[dict]:
+    """
+    Get recent strategy changes from Firestore for PDF report.
+
+    Returns:
+        List of strategy change records with parameter diffs
+    """
+    try:
+        from database.firestore import FirestoreClient
+
+        firestore = FirestoreClient()
+        changes = firestore.get_strategy_changes(limit=limit)
+
+        # Enrich with strategy details
+        enriched = []
+        for change in changes:
+            enriched_change = {
+                "changed_at": change.get("changed_at"),
+                "reason": change.get("reason", ""),
+                "from_strategy_id": change.get("from_strategy_id"),
+                "to_strategy_id": change.get("to_strategy_id"),
+                "modifications": [],
+            }
+
+            # Get strategy configs to find parameter diffs
+            from_id = change.get("from_strategy_id")
+            to_id = change.get("to_strategy_id")
+
+            if from_id and to_id:
+                from_strategy = firestore.get_strategy(from_id)
+                to_strategy = firestore.get_strategy(to_id)
+
+                if from_strategy and to_strategy:
+                    # Parameters are stored in 'parameters' field
+                    from_config = from_strategy.get("parameters", {})
+                    to_config = to_strategy.get("parameters", {})
+
+                    # Find parameter changes
+                    for key in to_config:
+                        if key in from_config and from_config[key] != to_config[key]:
+                            enriched_change["modifications"].append({
+                                "parameter": key,
+                                "old_value": from_config[key],
+                                "new_value": to_config[key],
+                            })
+
+            enriched.append(enriched_change)
+
+        return enriched
+    except Exception as e:
+        logger.warning(f"Failed to get strategy changes: {e}")
+        return []
+
+
 class PDFReportGenerator:
     """Generate PDF reports from backtest results."""
 
@@ -25,7 +79,7 @@ class PDFReportGenerator:
         Args:
             output_dir: Directory to save PDFs
         """
-        self.output_dir = output_dir or Path("reports")
+        self.output_dir = output_dir or Path("reports/pdf")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def generate(self, result, filename: Optional[str] = None) -> Path:
@@ -57,6 +111,9 @@ class PDFReportGenerator:
 
             # Page 4: Trade List
             self._create_trade_list_page(result, pdf)
+
+            # Page 5: Claude AI Strategy Changes
+            self._create_claude_changes_page(pdf)
 
         logger.info(f"PDF report saved: {filepath}")
         return filepath
@@ -318,3 +375,115 @@ class PDFReportGenerator:
 
             pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
+
+    def _create_claude_changes_page(self, pdf):
+        """Create page showing Claude AI strategy modifications."""
+        changes = get_strategy_changes_for_pdf(limit=10)
+
+        if not changes:
+            # Create a simple page noting no changes
+            fig, ax = plt.subplots(figsize=(11, 8.5))
+            ax.axis('off')
+            fig.text(0.5, 0.95, 'Claude AI Strategy Modifications',
+                    ha='center', va='top', fontsize=18, fontweight='bold')
+            fig.text(0.5, 0.50, 'No strategy modifications recorded yet.',
+                    ha='center', va='center', fontsize=12, color='gray')
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+            return
+
+        fig, ax = plt.subplots(figsize=(11, 8.5))
+        ax.axis('off')
+
+        # Title
+        fig.text(0.5, 0.95, 'Claude AI Strategy Modifications',
+                ha='center', va='top', fontsize=18, fontweight='bold')
+        fig.text(0.5, 0.91, 'Recent parameter changes by Claude Analyzer',
+                ha='center', va='top', fontsize=11, color='gray')
+
+        y_pos = 0.85
+        max_changes_per_page = 5
+
+        for idx, change in enumerate(changes[:max_changes_per_page]):
+            if y_pos < 0.15:
+                break
+
+            # Change header with date
+            changed_at = change.get("changed_at")
+            if changed_at:
+                if hasattr(changed_at, 'strftime'):
+                    date_str = changed_at.strftime('%Y-%m-%d %H:%M')
+                else:
+                    date_str = str(changed_at)[:16]
+            else:
+                date_str = "Unknown date"
+
+            fig.text(0.05, y_pos, f"#{idx + 1}  {date_str}",
+                    fontsize=11, fontweight='bold', color='#1a73e8')
+            y_pos -= 0.03
+
+            # Reason (Claude's summary)
+            reason = change.get("reason", "No reason provided")
+            # Truncate long reasons
+            if len(reason) > 100:
+                reason = reason[:97] + "..."
+            fig.text(0.07, y_pos, f"Summary: {reason}",
+                    fontsize=9, style='italic', color='#444444')
+            y_pos -= 0.025
+
+            # Parameter modifications
+            modifications = change.get("modifications", [])
+            if modifications:
+                fig.text(0.07, y_pos, "Parameter Changes:",
+                        fontsize=9, fontweight='bold')
+                y_pos -= 0.022
+
+                for mod in modifications[:6]:  # Limit to 6 params per change
+                    param = mod.get("parameter", "?")
+                    old_val = mod.get("old_value", "?")
+                    new_val = mod.get("new_value", "?")
+
+                    # Format values nicely
+                    if isinstance(old_val, float):
+                        old_str = f"{old_val:.4g}"
+                    elif isinstance(old_val, bool):
+                        old_str = "ON" if old_val else "OFF"
+                    else:
+                        old_str = str(old_val)
+
+                    if isinstance(new_val, float):
+                        new_str = f"{new_val:.4g}"
+                    elif isinstance(new_val, bool):
+                        new_str = "ON" if new_val else "OFF"
+                    else:
+                        new_str = str(new_val)
+
+                    # Arrow indicator
+                    fig.text(0.09, y_pos, f"• {param}:", fontsize=8)
+                    fig.text(0.30, y_pos, f"{old_str}", fontsize=8, color='#d93025')
+                    fig.text(0.42, y_pos, "→", fontsize=8)
+                    fig.text(0.46, y_pos, f"{new_str}", fontsize=8, color='#0d652d',
+                            fontweight='bold')
+                    y_pos -= 0.020
+
+                if len(modifications) > 6:
+                    fig.text(0.09, y_pos, f"  ... and {len(modifications) - 6} more changes",
+                            fontsize=8, color='gray')
+                    y_pos -= 0.020
+            else:
+                fig.text(0.07, y_pos, "No parameter details available",
+                        fontsize=8, color='gray')
+                y_pos -= 0.020
+
+            # Separator line
+            y_pos -= 0.015
+            ax.axhline(y=y_pos + 0.01, xmin=0.05, xmax=0.95,
+                      color='#e0e0e0', linewidth=0.5)
+            y_pos -= 0.02
+
+        # Footer
+        fig.text(0.5, 0.05, f"Showing {min(len(changes), max_changes_per_page)} of {len(changes)} recent changes",
+                ha='center', fontsize=8, color='gray')
+
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close(fig)

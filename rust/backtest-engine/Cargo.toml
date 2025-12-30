@@ -1,0 +1,34 @@
+[package]
+name = "backtest-engine"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "backtest-engine"
+path = "src/main.rs"
+
+[lib]
+name = "backtest_engine"
+path = "src/lib.rs"
+
+[dependencies]
+common = { path = "../common" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Data loading
+csv = "1.3"
+
+# Performance
+rayon = "1.10"
+
+# Random for synthetic data
+rand = "0.8"
+
+[dev-dependencies]
+approx = "0.5"
