@@ -58,12 +58,16 @@ jobs:
             sleep 10
           done
 
-      - name: Tag as latest
+      - name: Tag and push as latest
         run: |
-          gcloud artifacts docker tags add \
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest \
-            --project=${{ env.PROJECT_ID }}
+          # Configure docker to authenticate with Artifact Registry
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+          # Pull the SHA-tagged image, tag as latest, and push
+          docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Deploy to GCE
         run: |
