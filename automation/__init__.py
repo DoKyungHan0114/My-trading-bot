@@ -15,4 +15,10 @@ def __getattr__(name):
     if name == "AutomationScheduler":
         from automation.scheduler import AutomationScheduler
         return AutomationScheduler
+    if name == "scheduler":
+        from automation import scheduler
+        return scheduler
+    if name == "claude_analyzer":
+        from automation import claude_analyzer
+        return claude_analyzer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
