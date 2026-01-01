@@ -191,7 +191,8 @@ class TestIsMarketOpen:
 
     def test_returns_true_when_unavailable(self, mock_settings):
         """Verify returns True when Alpaca not available (for testing)."""
-        with patch("execution.broker.ALPACA_AVAILABLE", False):
+        with patch("execution.broker.ALPACA_AVAILABLE", False), \
+             patch("execution.services.account.ALPACA_AVAILABLE", False):
             from execution.broker import AlpacaBroker
 
             broker = AlpacaBroker(paper=True)

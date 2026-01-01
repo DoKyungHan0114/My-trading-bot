@@ -304,17 +304,41 @@ def mock_trading_bot(mock_settings, mock_broker):
 @pytest.fixture
 def mock_scheduler():
     """Create AutomationScheduler with mocked dependencies."""
-    with patch("automation.scheduler.ClaudeAnalyzer") as MockAnalyzer, \
-         patch("automation.scheduler.ReportGenerator") as MockReportGen, \
-         patch("automation.scheduler.DiscordNotifier") as MockDiscord, \
+    import sys
+
+    # Mock sklearn before importing any modules that use it
+    mock_sklearn = MagicMock()
+    mock_sklearn.feature_extraction = MagicMock()
+    mock_sklearn.feature_extraction.text = MagicMock()
+    mock_sklearn.feature_extraction.text.TfidfVectorizer = MagicMock()
+    mock_sklearn.metrics = MagicMock()
+    mock_sklearn.metrics.pairwise = MagicMock()
+    mock_sklearn.metrics.pairwise.cosine_similarity = MagicMock(return_value=[[1.0]])
+    sys.modules['sklearn'] = mock_sklearn
+    sys.modules['sklearn.feature_extraction'] = mock_sklearn.feature_extraction
+    sys.modules['sklearn.feature_extraction.text'] = mock_sklearn.feature_extraction.text
+    sys.modules['sklearn.metrics'] = mock_sklearn.metrics
+    sys.modules['sklearn.metrics.pairwise'] = mock_sklearn.metrics.pairwise
+
+    # Create mock instances before patching
+    mock_analyzer = MagicMock()
+    mock_analyzer.analyze.return_value = None
+
+    mock_report_gen = MagicMock()
+    mock_report = MagicMock()
+    mock_report.recent_performance = None
+    mock_report_gen.generate_report.return_value = mock_report
+    mock_report_gen.save_report.return_value = "/tmp/test_report.json"
+
+    mock_discord = MagicMock()
+    mock_discord.enabled = False
+    mock_discord.send_message.return_value = True
+    mock_discord.send_error_alert.return_value = True
+
+    with patch("automation.scheduler.ClaudeAnalyzer", return_value=mock_analyzer), \
+         patch("automation.scheduler.ReportGenerator", return_value=mock_report_gen), \
+         patch("automation.scheduler.DiscordNotifier", return_value=mock_discord), \
          patch("automation.scheduler.FirestoreClient"):
-
-        MockAnalyzer.return_value = Mock()
-        MockReportGen.return_value = Mock()
-
-        mock_discord = Mock()
-        mock_discord.enabled = False
-        MockDiscord.return_value = mock_discord
 
         from automation.scheduler import AutomationScheduler, ScheduleConfig
 
@@ -325,5 +349,7 @@ def mock_scheduler():
         )
         scheduler = AutomationScheduler(config=config, firestore_client=None)
         scheduler.discord = mock_discord
+        scheduler.report_gen = mock_report_gen
+        scheduler.analyzer = mock_analyzer
 
         yield scheduler

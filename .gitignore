@@ -1,11 +1,13 @@
 # Environment
 .env
 .env.local
+.env.*.local
 
 # Credentials (NEVER commit these!)
 credentials/
 *.json
 !package.json
+!package-lock.json
 !tsconfig.json
 
 # Python
@@ -17,6 +19,17 @@ __pycache__/
 venv/
 .venv/
 ENV/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Python testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.tox/
 
 # Logs
 logs/
@@ -25,10 +38,14 @@ logs/
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
 
 # Reports (optional - may contain sensitive data)
 reports/*.json
@@ -37,9 +54,28 @@ reports/*.png
 
 # Data cache
 data/cache/
+*.parquet
+*.pkl
+*.h5
+
+# Node.js (frontend)
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+.npm/
+npm-debug.log*
 
 # Test files
 test_strategy_reload.py
 
 # Rust
-rust/target
+rust/target/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets
+*.pem
+*.key
+service-account*.json

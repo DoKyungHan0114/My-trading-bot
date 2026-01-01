@@ -1,4 +1,5 @@
 """Automation module for Claude analysis and scheduling."""
+import importlib
 
 # Lazy imports to avoid circular dependencies and unnecessary loading
 # Use: from automation.claude_analyzer import ClaudeAnalyzer
@@ -16,9 +17,9 @@ def __getattr__(name):
         from automation.scheduler import AutomationScheduler
         return AutomationScheduler
     if name == "scheduler":
-        from automation import scheduler
-        return scheduler
+        # Use importlib to avoid recursion through __getattr__
+        return importlib.import_module("automation.scheduler")
     if name == "claude_analyzer":
-        from automation import claude_analyzer
-        return claude_analyzer
+        # Use importlib to avoid recursion through __getattr__
+        return importlib.import_module("automation.claude_analyzer")
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

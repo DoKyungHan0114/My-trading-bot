@@ -217,6 +217,67 @@ def format_detailed_trades(trades: list[dict], max_trades: int = 3) -> str:
     return result
 
 
+def _create_problem_embed(date: str, uptime_stats) -> dict:
+    """Create problem-focused embed when critical issues exist."""
+    color = 0xFF0000  # Red - problem
+
+    hours = uptime_stats.bot_running_minutes // 60
+    mins = uptime_stats.bot_running_minutes % 60
+
+    # Uptime field
+    uptime_text = f"🔴 **{uptime_stats.uptime_pct:.1f}%** ({hours}h {mins}m / 6.5h)"
+    if uptime_stats.uptime_pct < 50:
+        uptime_text += "\n⚠️ **봇이 거의 실행되지 않았습니다!**"
+
+    fields = [
+        {
+            "name": "🚨 Uptime 문제",
+            "value": uptime_text,
+            "inline": False,
+        },
+    ]
+
+    # Errors field
+    if uptime_stats.errors:
+        error_list = []
+        for i, err in enumerate(uptime_stats.errors[:5]):  # Max 5 errors
+            error_list.append(f"{i+1}. `{err[:100]}`")
+        error_text = "\n".join(error_list)
+        if len(uptime_stats.errors) > 5:
+            error_text += f"\n... +{len(uptime_stats.errors) - 5} more"
+
+        fields.append({
+            "name": f"❌ Errors ({len(uptime_stats.errors)}개)",
+            "value": error_text,
+            "inline": False,
+        })
+
+    # Action items
+    action_text = (
+        "1. GCP Cloud Run 로그 확인\n"
+        "2. Cloud Scheduler 실행 여부 확인\n"
+        "3. 서비스 재배포 고려"
+    )
+    fields.append({
+        "name": "🔧 확인 필요 사항",
+        "value": action_text,
+        "inline": False,
+    })
+
+    embed = {
+        "title": f"🚨 Daily Report - {date} (문제 감지)",
+        "description": "**봇에 문제가 있어 정상적인 거래가 불가능했습니다.**",
+        "color": color,
+        "timestamp": datetime.utcnow().isoformat(),
+        "fields": fields,
+        "footer": {
+            "text": "TQQQ RSI(2) Paper Trading - PROBLEM DETECTED",
+        },
+    }
+
+    return embed
+
+
 def create_daily_embed(
     date: str,
     equity: float,
@@ -231,6 +292,16 @@ def create_daily_embed(
 ) -> dict:
     """Create Discord embed for daily report."""
 
+    # Check for critical issues first
+    has_uptime_issue = uptime_stats and uptime_stats.uptime_pct < 50
+    has_errors = uptime_stats and uptime_stats.errors
+    has_critical_issue = has_uptime_issue or has_errors
+
+    # If critical issues exist, show problem-focused report
+    if has_critical_issue and uptime_stats:
+        return _create_problem_embed(date=date, uptime_stats=uptime_stats)
+
+    # Normal report below
     # Color based on P&L
     if daily_pnl > 0:
         color = 0x00FF00  # Green
@@ -301,15 +372,13 @@ def create_daily_embed(
                 "inline": False,
             })
 
-    # Add bot uptime info
+    # Add bot uptime info (only for normal reports with good uptime)
     if uptime_stats:
         uptime_emoji = "🟢" if uptime_stats.uptime_pct >= 95 else "🟡" if uptime_stats.uptime_pct >= 80 else "🔴"
         hours = uptime_stats.bot_running_minutes // 60
         mins = uptime_stats.bot_running_minutes % 60
 
         uptime_text = f"{uptime_emoji} **{uptime_stats.uptime_pct:.1f}%** ({hours}h {mins}m / 6.5h)"
-        if uptime_stats.errors:
-            uptime_text += f"\n⚠️ {len(uptime_stats.errors)} error(s)"
 
         embed["fields"].append({
             "name": "🤖 Bot Uptime",
