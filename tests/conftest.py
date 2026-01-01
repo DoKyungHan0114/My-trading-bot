@@ -262,12 +262,12 @@ def temp_trades_file(tmp_path, sample_trades) -> Path:
 @pytest.fixture
 def mock_trading_bot(mock_settings, mock_broker):
     """Create TradingBot with mocked dependencies."""
-    with patch("main.FIRESTORE_AVAILABLE", False), \
-         patch("main.AlpacaBroker") as MockBroker, \
-         patch("main.DiscordNotifier") as MockDiscord, \
-         patch("main.DataFetcher") as MockFetcher, \
-         patch("main.TradeLogger") as MockLogger, \
-         patch("main.AuditTrail") as MockAudit:
+    with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+         patch("trading_bot.AlpacaBroker") as MockBroker, \
+         patch("trading_bot.DiscordNotifier") as MockDiscord, \
+         patch("trading_bot.DataFetcher") as MockFetcher, \
+         patch("trading_bot.TradeLogger") as MockLogger, \
+         patch("trading_bot.AuditTrail") as MockAudit:
 
         MockBroker.return_value = mock_broker
 
@@ -286,7 +286,7 @@ def mock_trading_bot(mock_settings, mock_broker):
         mock_audit = Mock()
         MockAudit.return_value = mock_audit
 
-        from main import TradingBot
+        from trading_bot import TradingBot
         bot = TradingBot(mode="paper")
         bot.broker = mock_broker
         bot.discord = mock_discord

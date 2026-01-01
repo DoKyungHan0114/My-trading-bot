@@ -20,12 +20,12 @@ class TestTradingBotLoopSafety:
     @pytest.fixture
     def mock_trading_bot_for_loop(self, mock_settings):
         """Create TradingBot specifically for loop testing."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher") as MockFetcher, \
-             patch("main.TradeLogger"), \
-             patch("main.AuditTrail"):
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher") as MockFetcher, \
+             patch("trading_bot.TradeLogger"), \
+             patch("trading_bot.AuditTrail"):
 
             mock_broker = Mock()
             mock_broker.get_account.return_value = {
@@ -43,7 +43,7 @@ class TestTradingBotLoopSafety:
 
             MockFetcher.return_value = Mock()
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             yield bot
@@ -129,12 +129,12 @@ class TestTradingBotMaxIterations:
 
     def test_loop_terminates_with_iteration_tracking(self, mock_settings):
         """Verify we can track and limit iterations."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher"), \
-             patch("main.TradeLogger"), \
-             patch("main.AuditTrail"):
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher"), \
+             patch("trading_bot.TradeLogger"), \
+             patch("trading_bot.AuditTrail"):
 
             mock_broker = Mock()
             mock_broker.get_account.return_value = {"account_number": "TEST", "equity": 10000.0, "buying_power": 10000.0}
@@ -144,7 +144,7 @@ class TestTradingBotMaxIterations:
 
             MockDiscord.return_value.enabled = False
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
 

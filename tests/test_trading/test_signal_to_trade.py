@@ -18,12 +18,12 @@ class TestSignalToTradeExecution:
     @pytest.fixture
     def trading_bot_with_oversold_data(self, mock_settings, oversold_ohlcv_data, mock_broker):
         """Create TradingBot with oversold data."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher") as MockFetcher, \
-             patch("main.TradeLogger") as MockLogger, \
-             patch("main.AuditTrail") as MockAudit:
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher") as MockFetcher, \
+             patch("trading_bot.TradeLogger") as MockLogger, \
+             patch("trading_bot.AuditTrail") as MockAudit:
 
             MockBroker.return_value = mock_broker
             mock_broker.get_position.return_value = None  # No position
@@ -44,7 +44,7 @@ class TestSignalToTradeExecution:
             mock_audit = Mock()
             MockAudit.return_value = mock_audit
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             bot.data_fetcher = mock_fetcher
@@ -83,12 +83,12 @@ class TestSignalToTradeExecution:
 
     def test_execute_buy_logs_trade(self, mock_settings, mock_broker):
         """Verify buy execution logs trade."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher"), \
-             patch("main.TradeLogger") as MockLogger, \
-             patch("main.AuditTrail") as MockAudit:
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher"), \
+             patch("trading_bot.TradeLogger") as MockLogger, \
+             patch("trading_bot.AuditTrail") as MockAudit:
 
             MockBroker.return_value = mock_broker
 
@@ -102,7 +102,7 @@ class TestSignalToTradeExecution:
             mock_audit = Mock()
             MockAudit.return_value = mock_audit
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             bot.trade_logger = mock_logger
@@ -130,12 +130,12 @@ class TestSignalToTradeExecution:
 
     def test_execute_sell_calculates_pnl(self, mock_settings, mock_broker):
         """Verify sell execution calculates P&L."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher"), \
-             patch("main.TradeLogger") as MockLogger, \
-             patch("main.AuditTrail") as MockAudit:
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher"), \
+             patch("trading_bot.TradeLogger") as MockLogger, \
+             patch("trading_bot.AuditTrail") as MockAudit:
 
             MockBroker.return_value = mock_broker
 
@@ -149,7 +149,7 @@ class TestSignalToTradeExecution:
             mock_audit = Mock()
             MockAudit.return_value = mock_audit
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             bot.trade_logger = mock_logger
@@ -186,12 +186,12 @@ class TestNoOrderWithoutSignal:
 
     def test_no_order_when_rsi_neutral(self, mock_settings, sample_ohlcv_data, mock_broker):
         """Verify no order when no signal generated."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher") as MockFetcher, \
-             patch("main.TradeLogger"), \
-             patch("main.AuditTrail"):
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher") as MockFetcher, \
+             patch("trading_bot.TradeLogger"), \
+             patch("trading_bot.AuditTrail"):
 
             MockBroker.return_value = mock_broker
             mock_broker.get_position.return_value = None
@@ -202,7 +202,7 @@ class TestNoOrderWithoutSignal:
 
             MockDiscord.return_value.enabled = False
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             bot.data_fetcher = mock_fetcher
@@ -221,12 +221,12 @@ class TestHedgeExecution:
 
     def test_execute_hedge_buy_logs_trade(self, mock_settings, mock_broker):
         """Verify hedge buy execution logs trade."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher"), \
-             patch("main.TradeLogger") as MockLogger, \
-             patch("main.AuditTrail") as MockAudit:
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher"), \
+             patch("trading_bot.TradeLogger") as MockLogger, \
+             patch("trading_bot.AuditTrail") as MockAudit:
 
             MockBroker.return_value = mock_broker
 
@@ -243,7 +243,7 @@ class TestHedgeExecution:
             # Enable short
             mock_settings.strategy.short_enabled = True
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             bot.trade_logger = mock_logger
@@ -271,12 +271,12 @@ class TestHedgeExecution:
 
     def test_execute_hedge_sell_logs_trade(self, mock_settings, mock_broker):
         """Verify hedge sell execution logs trade with P&L."""
-        with patch("main.FIRESTORE_AVAILABLE", False), \
-             patch("main.AlpacaBroker") as MockBroker, \
-             patch("main.DiscordNotifier") as MockDiscord, \
-             patch("main.DataFetcher"), \
-             patch("main.TradeLogger") as MockLogger, \
-             patch("main.AuditTrail") as MockAudit:
+        with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
+             patch("trading_bot.AlpacaBroker") as MockBroker, \
+             patch("trading_bot.DiscordNotifier") as MockDiscord, \
+             patch("trading_bot.DataFetcher"), \
+             patch("trading_bot.TradeLogger") as MockLogger, \
+             patch("trading_bot.AuditTrail") as MockAudit:
 
             MockBroker.return_value = mock_broker
 
@@ -290,7 +290,7 @@ class TestHedgeExecution:
             mock_audit = Mock()
             MockAudit.return_value = mock_audit
 
-            from main import TradingBot
+            from trading_bot import TradingBot
             bot = TradingBot(mode="paper")
             bot.broker = mock_broker
             bot.trade_logger = mock_logger
