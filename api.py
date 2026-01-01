@@ -298,6 +298,150 @@ async def health_check():
 
 
 # =========================================================================
+# TRADING TICK ENDPOINT (Called by Cloud Scheduler)
+# =========================================================================
+
+# Global trading bot instance (lazy initialized)
+_trading_bot: Optional["TradingBot"] = None
+
+
+def get_trading_bot() -> Optional["TradingBot"]:
+    """Get or create TradingBot instance."""
+    global _trading_bot
+    if not TRADING_SYSTEM_AVAILABLE:
+        return None
+    if _trading_bot is None:
+        try:
+            from main import TradingBot
+            _trading_bot = TradingBot(mode="paper")
+            logger.info("TradingBot initialized for scheduled execution")
+        except Exception as e:
+            logger.error(f"Failed to initialize TradingBot: {e}")
+            return None
+    return _trading_bot
+
+
+class TradingTickResponse(BaseModel):
+    status: str
+    message: str
+    market_open: bool
+    signal_checked: bool
+    position: Optional[dict] = None
+    timestamp: str
+
+
+@app.post("/api/trading/tick")
+async def trading_tick():
+    """
+    Execute one trading tick - called by Cloud Scheduler every minute.
+    Checks for signals and executes trades if conditions are met.
+    """
+    bot = get_trading_bot()
+    if not bot:
+        return TradingTickResponse(
+            status="error",
+            message="Trading system not available",
+            market_open=False,
+            signal_checked=False,
+            timestamp=datetime.now().isoformat()
+        )
+
+    try:
+        # Check if market is open
+        market_open = bot.broker.is_market_open()
+
+        if not market_open:
+            return TradingTickResponse(
+                status="skipped",
+                message="Market is closed",
+                market_open=False,
+                signal_checked=False,
+                timestamp=datetime.now().isoformat()
+            )
+
+        # Check for strategy updates from Firestore
+        bot._check_strategy_update()
+
+        # Run trading logic
+        bot._check_signals()
+
+        # Get current position
+        position = bot.broker.get_position("TQQQ")
+        position_dict = None
+        if position:
+            position_dict = {
+                "symbol": position["symbol"],
+                "qty": position["qty"],
+                "avg_entry_price": position["avg_entry_price"],
+                "market_value": position["market_value"],
+                "unrealized_pl": position["unrealized_pl"],
+            }
+
+        return TradingTickResponse(
+            status="success",
+            message="Trading tick completed",
+            market_open=True,
+            signal_checked=True,
+            position=position_dict,
+            timestamp=datetime.now().isoformat()
+        )
+
+    except Exception as e:
+        logger.exception(f"Trading tick error: {e}")
+        return TradingTickResponse(
+            status="error",
+            message=str(e),
+            market_open=False,
+            signal_checked=False,
+            timestamp=datetime.now().isoformat()
+        )
+
+
+@app.get("/api/trading/status")
+async def trading_status():
+    """Get current trading bot status."""
+    bot = get_trading_bot()
+    if not bot:
+        return {
+            "status": "unavailable",
+            "message": "Trading system not initialized",
+            "timestamp": datetime.now().isoformat()
+        }
+
+    try:
+        account = bot.broker.get_account()
+        position = bot.broker.get_position("TQQQ")
+        market_open = bot.broker.is_market_open()
+        strategy = bot.settings.strategy
+
+        return {
+            "status": "running",
+            "mode": bot.mode.value,
+            "market_open": market_open,
+            "account": {
+                "equity": account["equity"],
+                "cash": account["cash"],
+                "buying_power": account["buying_power"],
+            },
+            "position": position,
+            "strategy": {
+                "rsi_period": strategy.rsi_period,
+                "rsi_oversold": strategy.rsi_oversold,
+                "rsi_overbought": strategy.rsi_overbought,
+                "sma_period": strategy.sma_period,
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.exception(f"Trading status error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+# =========================================================================
 # COMMAND EXECUTION ENDPOINTS
 # =========================================================================
 
