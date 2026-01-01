@@ -4,7 +4,7 @@ Unified TradeRecord class for consistent trade data across all modules.
 This module consolidates trade recording logic that was previously duplicated across:
 - logging_system/trade_logger.py (TradeLog)
 - backtest/engine.py (BacktestTrade)
-- main.py (ad-hoc trade logging)
+- trading_bot.py (ad-hoc trade logging)
 """
 import uuid
 from dataclasses import dataclass, field
@@ -22,7 +22,7 @@ class TradeRecord:
     Unified trade record representation.
 
     Used consistently across:
-    - Live trading (main.py)
+    - Live trading (trading_bot.py)
     - Backtesting (backtest/engine.py)
     - Trade logging (logging_system/trade_logger.py)
     """

@@ -3,8 +3,8 @@
 TQQQ RSI(2) Mean Reversion Trading System - Live/Paper Trading.
 
 Usage:
-    python main.py --mode paper   # Paper trading
-    python main.py --mode live    # Live trading (caution!)
+    python trading_bot.py --mode paper   # Paper trading
+    python trading_bot.py --mode live    # Live trading (caution!)
 """
 import argparse
 import asyncio

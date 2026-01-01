@@ -26,5 +26,5 @@ RUN mkdir -p logs reports
 ENV PYTHONUNBUFFERED=1
 
 # Default: run trading bot in paper mode
-# Override with: docker run ... python main.py --mode live
-CMD ["python", "main.py", "--mode", "paper"]
+# Override with: docker run ... python trading_bot.py --mode live
+CMD ["python", "trading_bot.py", "--mode", "paper"]

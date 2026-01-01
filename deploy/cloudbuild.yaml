@@ -1,9 +1,11 @@
 # Cloud Build configuration for TQQQ Trading System
-# Builds and deploys the API server to Cloud Run
+# Builds and deploys both API server (Cloud Run) and Trading Bot (GCE)
 
 steps:
-  # Build the Docker image
+  # ========== API Server Build ==========
+  # Build the API Docker image
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-api'
     args:
       - 'build'
       - '-t'
@@ -11,19 +13,52 @@ steps:
       - '-t'
       - 'gcr.io/$PROJECT_ID/tqqq-trading-api:latest'
       - '-f'
-      - 'deploy/Dockerfile'
+      - 'deploy/Dockerfile.api'
       - '.'
 
-  # Push the image to Container Registry
+  # ========== Trading Bot Build ==========
+  # Build the Trading Bot Docker image
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-trading-bot'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-bot:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-bot:latest'
+      - '-f'
+      - 'deploy/Dockerfile.trading-bot'
+      - '.'
+
+  # Push API image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-api-sha'
+    waitFor: ['build-api']
     args:
       - 'push'
       - 'gcr.io/$PROJECT_ID/tqqq-trading-api:$COMMIT_SHA'
 
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-api-latest'
+    waitFor: ['build-api']
     args:
       - 'push'
       - 'gcr.io/$PROJECT_ID/tqqq-trading-api:latest'
+
+  # Push Trading Bot image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-bot-sha'
+    waitFor: ['build-trading-bot']
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-bot:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-bot-latest'
+    waitFor: ['build-trading-bot']
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/tqqq-trading-bot:latest'
 
   # Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -69,6 +104,8 @@ options:
 images:
   - 'gcr.io/$PROJECT_ID/tqqq-trading-api:$COMMIT_SHA'
   - 'gcr.io/$PROJECT_ID/tqqq-trading-api:latest'
+  - 'gcr.io/$PROJECT_ID/tqqq-trading-bot:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/tqqq-trading-bot:latest'
 
 # Build timeout
 timeout: '1200s'

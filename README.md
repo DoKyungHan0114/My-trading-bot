@@ -90,7 +90,7 @@ When RSI exceeds 90 (extreme overbought), the system:
 ```
 tqqq-trading-system/
 ├── api.py                 # FastAPI server
-├── main.py                # Trading loop entry point
+├── trading_bot.py         # Trading loop entry point
 ├── backtest_runner.py     # Backtest orchestrator
 ├── discord_bot.py         # Discord notifications
 ├── export_strategy.py     # Strategy export to JSON

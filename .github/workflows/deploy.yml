@@ -34,11 +34,14 @@ jobs:
       - name: Build with Cloud Build
         run: |
           # Submit build asynchronously to avoid log streaming permission issues
+          # Use Dockerfile.trading-bot for the trading bot image
           BUILD_ID=$(gcloud builds submit \
             --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --project=${{ env.PROJECT_ID }} \
+            --gcs-source-staging-dir=gs://${{ env.PROJECT_ID }}_cloudbuild/source \
             --async \
-            --format='value(id)')
+            --format='value(id)' \
+            --dockerfile=deploy/Dockerfile.trading-bot)
 
           echo "Build ID: $BUILD_ID"
 

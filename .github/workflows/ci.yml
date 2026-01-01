@@ -29,8 +29,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # sklearn is used by RAG retriever but not in requirements.txt
-          pip install scikit-learn
 
       - name: Run tests
         run: |
@@ -43,7 +41,7 @@ jobs:
 
       - name: Check import errors
         run: |
-          python -c "from main import TradingBot; print('main.py imports OK')"
+          python -c "from trading_bot import TradingBot; print('trading_bot.py imports OK')"
           python -c "from automation.scheduler import AutomationScheduler; print('scheduler imports OK')"
           python -c "from strategy.signals import SignalGenerator; print('signals imports OK')"
 
@@ -94,7 +92,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install scikit-learn
 
       - name: Run mypy
         run: |
