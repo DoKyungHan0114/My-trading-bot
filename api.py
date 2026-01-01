@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import json
+import platform
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -301,49 +302,76 @@ async def health_check():
 # =========================================================================
 
 PROJECT_ROOT = Path(__file__).parent
+IS_WINDOWS = platform.system() == "Windows"
+
+
+def get_script_command(script_name: str, *args) -> list[str]:
+    """Get the appropriate command for the current platform."""
+    if IS_WINDOWS:
+        ps1_script = PROJECT_ROOT / f"{script_name}.ps1"
+        if ps1_script.exists():
+            return ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1_script), *args]
+        # Fallback to Python if no ps1 script
+        return ["python", f"{script_name}.py", *args]
+    else:
+        return [f"./{script_name}.sh", *args]
+
+
+def get_python_command() -> str:
+    """Get the Python executable for the current platform."""
+    return "python" if IS_WINDOWS else "python3"
+
+
+def get_rust_engine_path() -> str:
+    """Get the Rust engine executable path for the current platform."""
+    if IS_WINDOWS:
+        return str(PROJECT_ROOT / "rust" / "target" / "release" / "backtest-engine.exe")
+    else:
+        return "./rust/target/release/backtest-engine"
+
 
 # Available commands configuration
 COMMANDS = {
     "backtest": {
         "name": "Backtest + Claude AI",
         "description": "Rust backtest + Claude strategy analysis",
-        "command": ["./run_backtest_rust.sh", "365", "100000"],
+        "command": get_script_command("run_backtest_rust", "100000"),
         "cwd": PROJECT_ROOT,
     },
     "backtest_quick": {
         "name": "Quick Backtest (Rust)",
         "description": "Fast backtest only, no AI analysis",
-        "command": ["./rust/target/release/backtest-engine", "-f", "data/tqqq_daily.csv", "--capital", "100000", "--rsi-oversold", "48", "--rsi-overbought", "55", "--output", "text"],
+        "command": [get_rust_engine_path(), "-f", "data/tqqq_daily.csv", "--capital", "100000", "--rsi-oversold", "48", "--rsi-overbought", "55", "--output", "text"],
         "cwd": PROJECT_ROOT,
     },
     "backtest_python": {
         "name": "Backtest (Python)",
         "description": "Original Python backtest + Claude",
-        "command": ["./run_backtest.sh"],
+        "command": get_script_command("run_backtest"),
         "cwd": PROJECT_ROOT,
     },
     "backtest_loop": {
         "name": "Run Backtest Loop",
         "description": "Run multiple backtests with random parameters",
-        "command": ["./run_backtest_loop.sh"],
+        "command": get_script_command("run_backtest_loop"),
         "cwd": PROJECT_ROOT,
     },
     "export_strategy": {
         "name": "Export Strategy",
         "description": "Export current strategy to JSON",
-        "command": ["python3", "export_strategy.py", "--pretty"],
+        "command": [get_python_command(), "export_strategy.py", "--pretty"],
         "cwd": PROJECT_ROOT,
     },
     "start_trading": {
         "name": "Start Trading",
         "description": "Start the trading system",
-        "command": ["./start.sh"],
+        "command": get_script_command("start"),
         "cwd": PROJECT_ROOT,
     },
     "health_check": {
         "name": "Health Check",
         "description": "Check system health status",
-        "command": ["python3", "-c", "from api import *; import json; print(json.dumps({'trading_system': TRADING_SYSTEM_AVAILABLE, 'firestore': FIRESTORE_AVAILABLE}))"],
+        "command": [get_python_command(), "-c", "from api import *; import json; print(json.dumps({'trading_system': TRADING_SYSTEM_AVAILABLE, 'firestore': FIRESTORE_AVAILABLE}))"],
         "cwd": PROJECT_ROOT,
     },
 }
