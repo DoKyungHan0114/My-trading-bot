@@ -17,6 +17,10 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -41,7 +45,12 @@ try:
     from reports.report_generator import ReportGenerator
     from automation.claude_analyzer import ClaudeAnalyzer
     FIRESTORE_AVAILABLE = True
-except ImportError:
+    print("Firestore: Import successful")
+except ImportError as e:
+    print(f"Firestore: ImportError - {e}")
+    FIRESTORE_AVAILABLE = False
+except Exception as e:
+    print(f"Firestore: Exception during import - {e}")
     FIRESTORE_AVAILABLE = False
 
 # Initialize Firestore client
@@ -52,11 +61,15 @@ def get_firestore() -> Optional["FirestoreClient"]:
     """Get or create Firestore client."""
     global _firestore_client
     if not FIRESTORE_AVAILABLE:
+        print("Firestore: FIRESTORE_AVAILABLE is False")
         return None
     if _firestore_client is None:
         try:
+            print(f"Firestore: Initializing with project={os.getenv('GOOGLE_CLOUD_PROJECT')}, creds={os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}")
             _firestore_client = FirestoreClient()
+            print("Firestore: Initialized successfully")
         except Exception as e:
+            print(f"Firestore: Failed to initialize - {e}")
             logger.error(f"Failed to initialize Firestore: {e}")
             return None
     return _firestore_client
