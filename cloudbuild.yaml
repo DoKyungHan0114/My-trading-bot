@@ -1,0 +1,13 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_IMAGE_URL'
+      - '-f'
+      - 'deploy/Dockerfile.trading-bot'
+      - '.'
+images:
+  - '$_IMAGE_URL'
+substitutions:
+  _IMAGE_URL: 'us-central1-docker.pkg.dev/${PROJECT_ID}/tqqq/bot:latest'

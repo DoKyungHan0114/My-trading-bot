@@ -34,9 +34,9 @@ jobs:
       - name: Build with Cloud Build
         run: |
           # Submit build asynchronously to avoid log streaming permission issues
-          # Uses Dockerfile in project root
           BUILD_ID=$(gcloud builds submit \
-            --tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --config=cloudbuild.yaml \
+            --substitutions=_IMAGE_URL=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --project=${{ env.PROJECT_ID }} \
             --gcs-source-staging-dir=gs://${{ env.PROJECT_ID }}_cloudbuild/source \
             --async \

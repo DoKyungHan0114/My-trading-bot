@@ -37,7 +37,8 @@ gcloud artifacts repositories create "${AR_REPO}" \
 # Build using Cloud Build
 echo "Building with Cloud Build..."
 gcloud builds submit \
-    --tag "${IMAGE_URL}:${TAG}" \
+    --config=cloudbuild.yaml \
+    --substitutions=_IMAGE_URL="${IMAGE_URL}:${TAG}" \
     --project="${PROJECT_ID}" \
     --gcs-log-dir="gs://${PROJECT_ID}_cloudbuild/logs" \
     -q \
