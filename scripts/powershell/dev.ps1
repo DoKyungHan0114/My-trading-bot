@@ -2,7 +2,8 @@
 # Usage: .\dev.ps1
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$ProjectRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+Set-Location $ProjectRoot
 
 Write-Host "Starting TQQQ Trading System (Development)" -ForegroundColor Green
 Write-Host "Backend:  http://localhost:8000" -ForegroundColor Yellow
@@ -10,17 +11,17 @@ Write-Host "Frontend: http://localhost:5173" -ForegroundColor Yellow
 Write-Host ""
 
 # Activate virtual environment
-& "$PSScriptRoot\venv\Scripts\Activate.ps1"
+& "$ProjectRoot\venv\Scripts\Activate.ps1"
 
 # Start backend in background
 $backendJob = Start-Job -ScriptBlock {
-    Set-Location $using:PSScriptRoot
-    & "$using:PSScriptRoot\venv\Scripts\python.exe" api.py
+    Set-Location $using:ProjectRoot
+    & "$using:ProjectRoot\venv\Scripts\python.exe" src/api.py
 }
 
 # Start frontend in background
 $frontendJob = Start-Job -ScriptBlock {
-    Set-Location "$using:PSScriptRoot\frontend"
+    Set-Location "$using:ProjectRoot\frontend"
     npm run dev
 }
 

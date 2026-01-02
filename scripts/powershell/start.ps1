@@ -3,7 +3,8 @@
 # Usage: .\start.ps1
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$ProjectRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+Set-Location $ProjectRoot
 
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  TQQQ Trading System Dashboard" -ForegroundColor Green
@@ -23,21 +24,21 @@ if (!(Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 # Activate virtual environment
-& "$PSScriptRoot\venv\Scripts\Activate.ps1"
+& "$ProjectRoot\venv\Scripts\Activate.ps1"
 
 # Install frontend dependencies if needed
-if (!(Test-Path "$PSScriptRoot\frontend\node_modules")) {
+if (!(Test-Path "$ProjectRoot\frontend\node_modules")) {
     Write-Host "Installing frontend dependencies..." -ForegroundColor Yellow
-    Set-Location "$PSScriptRoot\frontend"
+    Set-Location "$ProjectRoot\frontend"
     npm install
-    Set-Location $PSScriptRoot
+    Set-Location $ProjectRoot
 }
 
 # Start Backend (FastAPI) in background
 Write-Host "Starting Backend API on http://localhost:8000" -ForegroundColor Green
 $backendJob = Start-Job -ScriptBlock {
-    Set-Location $using:PSScriptRoot
-    & "$using:PSScriptRoot\venv\Scripts\python.exe" api.py
+    Set-Location $using:ProjectRoot
+    & "$using:ProjectRoot\venv\Scripts\python.exe" src/api.py
 }
 
 # Wait for backend to start
@@ -46,7 +47,7 @@ Start-Sleep -Seconds 2
 # Start Frontend (Vite dev server) in background
 Write-Host "Starting Frontend on http://localhost:5173" -ForegroundColor Green
 $frontendJob = Start-Job -ScriptBlock {
-    Set-Location "$using:PSScriptRoot\frontend"
+    Set-Location "$using:ProjectRoot\frontend"
     npm run dev
 }
 

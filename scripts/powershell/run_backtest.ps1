@@ -9,7 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$ProjectRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+Set-Location $ProjectRoot
 
 # Get AUTO_APPLY from environment variable
 $AutoApply = if ($env:AUTO_APPLY -eq "true") { $true } else { $false }
@@ -26,11 +27,11 @@ Write-Host "Capital: `$$Capital" -ForegroundColor White
 Write-Host "==============================================" -ForegroundColor Cyan
 
 # Activate virtual environment
-& "$PSScriptRoot\venv\Scripts\Activate.ps1"
+& "$ProjectRoot\venv\Scripts\Activate.ps1"
 
 # Load environment variables from .env file
-if (Test-Path "$PSScriptRoot\.env") {
-    Get-Content "$PSScriptRoot\.env" | ForEach-Object {
+if (Test-Path "$ProjectRoot\.env") {
+    Get-Content "$ProjectRoot\.env" | ForEach-Object {
         if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
@@ -44,7 +45,7 @@ Write-Host "[Step 1/3] Running Backtest..." -ForegroundColor Yellow
 Write-Host "----------------------------------------------" -ForegroundColor Gray
 
 # Run backtest with PDF generation and Firestore saving
-python backtest_runner.py --start $StartDate --end $EndDate --capital $Capital --pdf --db
+python src/backtest_runner.py --start $StartDate --end $EndDate --capital $Capital --pdf --db
 
 Write-Host ""
 Write-Host "[Step 2/3] Generating Analysis Report..." -ForegroundColor Yellow

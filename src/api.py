@@ -15,7 +15,7 @@ from typing import Optional
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -325,7 +325,7 @@ def get_trading_bot() -> Optional["TradingBot"]:
         return None
     if _trading_bot is None:
         try:
-            from main import TradingBot
+            from src.trading_bot import TradingBot
             _trading_bot = TradingBot(mode="paper")
             logger.info("TradingBot initialized for scheduled execution")
         except Exception as e:
@@ -458,7 +458,7 @@ async def trading_status():
 # COMMAND EXECUTION ENDPOINTS
 # =========================================================================
 
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent
 IS_WINDOWS = platform.system() == "Windows"
 
 
@@ -940,7 +940,7 @@ async def list_sessions(limit: int = 7):
 
 
 # Serve static files from frontend build
-frontend_dist = Path(__file__).parent / "frontend" / "dist"
+frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if frontend_dist.exists():
     app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
 

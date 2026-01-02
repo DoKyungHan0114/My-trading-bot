@@ -14,7 +14,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import get_settings
 from database.firestore import FirestoreClient

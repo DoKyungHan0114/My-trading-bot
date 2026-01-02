@@ -8,7 +8,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$ProjectRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+Set-Location $ProjectRoot
 
 # Get AUTO_APPLY from environment variable
 $AutoApply = if ($env:AUTO_APPLY -eq "true") { $true } else { $false }
@@ -28,11 +29,11 @@ Write-Host "RSI: $RsiOversold/$RsiOverbought (optimized)" -ForegroundColor White
 Write-Host "==============================================" -ForegroundColor Cyan
 
 # Activate virtual environment
-& "$PSScriptRoot\venv\Scripts\Activate.ps1"
+& "$ProjectRoot\venv\Scripts\Activate.ps1"
 
 # Load environment variables from .env file
-if (Test-Path "$PSScriptRoot\.env") {
-    Get-Content "$PSScriptRoot\.env" | ForEach-Object {
+if (Test-Path "$ProjectRoot\.env") {
+    Get-Content "$ProjectRoot\.env" | ForEach-Object {
         if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
@@ -71,7 +72,7 @@ $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $ResultFile = "reports/rust_backtest_$Timestamp.json"
 
 # Run Rust engine
-& "$PSScriptRoot\rust\target\release\backtest-engine.exe" `
+& "$ProjectRoot\rust\target\release\backtest-engine.exe" `
     -f $DataFile `
     --capital $Capital `
     --rsi-oversold $RsiOversold `
@@ -82,7 +83,7 @@ $ResultFile = "reports/rust_backtest_$Timestamp.json"
 Write-Host "Backtest complete! Result saved to: $ResultFile" -ForegroundColor Green
 
 # Also show text summary
-& "$PSScriptRoot\rust\target\release\backtest-engine.exe" `
+& "$ProjectRoot\rust\target\release\backtest-engine.exe" `
     -f $DataFile `
     --capital $Capital `
     --rsi-oversold $RsiOversold `

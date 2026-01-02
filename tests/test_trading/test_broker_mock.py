@@ -10,6 +10,18 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+# Check if Alpaca is available for integration tests
+try:
+    from alpaca.trading.client import TradingClient
+    ALPACA_INSTALLED = True
+except ImportError:
+    ALPACA_INSTALLED = False
+
+requires_alpaca = pytest.mark.skipif(
+    not ALPACA_INSTALLED,
+    reason="Alpaca SDK not installed"
+)
+
 
 class TestAlpacaBrokerInit:
     """Test AlpacaBroker initialization."""
@@ -54,25 +66,26 @@ class TestGetAccount:
             assert account["account_number"] == "MOCK"
             assert account["equity"] == 10000.0
 
+    @requires_alpaca
     def test_returns_real_account_structure(self):
         """Verify real account has expected structure."""
+        mock_client = Mock()
+        mock_account = Mock()
+        mock_account.account_number = "PA123"
+        mock_account.status = "ACTIVE"
+        mock_account.cash = 10000.0
+        mock_account.buying_power = 10000.0
+        mock_account.equity = 10000.0
+        mock_account.portfolio_value = 10000.0
+        mock_account.pattern_day_trader = False
+        mock_account.trading_blocked = False
+        mock_account.transfers_blocked = False
+        mock_client.get_account.return_value = mock_account
+
         with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
-
-            mock_account = Mock()
-            mock_account.account_number = "PA123"
-            mock_account.status = "ACTIVE"
-            mock_account.cash = 10000.0
-            mock_account.buying_power = 10000.0
-            mock_account.equity = 10000.0
-            mock_account.portfolio_value = 10000.0
-            mock_account.pattern_day_trader = False
-            mock_account.trading_blocked = False
-            mock_account.transfers_blocked = False
-
-            mock_client = Mock()
-            mock_client.get_account.return_value = mock_account
-            MockClient.return_value = mock_client
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.account.ALPACA_AVAILABLE", True), \
+             patch("execution.services.account.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
 
@@ -98,24 +111,25 @@ class TestGetPosition:
 
             assert position is None
 
+    @requires_alpaca
     def test_returns_position_structure(self):
         """Verify position has expected structure."""
+        mock_client = Mock()
+        mock_position = Mock()
+        mock_position.symbol = "TQQQ"
+        mock_position.qty = 100.0
+        mock_position.avg_entry_price = 45.0
+        mock_position.market_value = 4500.0
+        mock_position.cost_basis = 4500.0
+        mock_position.unrealized_pl = 0.0
+        mock_position.unrealized_plpc = 0.0
+        mock_position.current_price = 45.0
+        mock_client.get_open_position.return_value = mock_position
+
         with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
-
-            mock_position = Mock()
-            mock_position.symbol = "TQQQ"
-            mock_position.qty = 100.0
-            mock_position.avg_entry_price = 45.0
-            mock_position.market_value = 4500.0
-            mock_position.cost_basis = 4500.0
-            mock_position.unrealized_pl = 0.0
-            mock_position.unrealized_plpc = 0.0
-            mock_position.current_price = 45.0
-
-            mock_client = Mock()
-            mock_client.get_open_position.return_value = mock_position
-            MockClient.return_value = mock_client
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.account.ALPACA_AVAILABLE", True), \
+             patch("execution.services.account.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
 
@@ -159,20 +173,21 @@ class TestSubmitOrder:
 
             assert broker.order_count == initial_count + 2
 
+    @requires_alpaca
     def test_real_order_submission(self):
         """Verify real order submission structure."""
+        mock_client = Mock()
+        mock_result = Mock()
+        mock_result.id = "order-123"
+        mock_result.filled_at = datetime.utcnow()
+        mock_result.filled_avg_price = 45.0
+        mock_result.filled_qty = 100.0
+        mock_client.submit_order.return_value = mock_result
+
         with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
-
-            mock_result = Mock()
-            mock_result.id = "order-123"
-            mock_result.filled_at = datetime.utcnow()
-            mock_result.filled_avg_price = 45.0
-            mock_result.filled_qty = 100.0
-
-            mock_client = Mock()
-            mock_client.submit_order.return_value = mock_result
-            MockClient.return_value = mock_client
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.order.ALPACA_AVAILABLE", True), \
+             patch("execution.services.order.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
             from execution.orders import Order
@@ -200,17 +215,18 @@ class TestIsMarketOpen:
 
             assert is_open == True
 
+    @requires_alpaca
     def test_returns_clock_status(self):
         """Verify returns actual clock status."""
+        mock_client = Mock()
+        mock_clock = Mock()
+        mock_clock.is_open = True
+        mock_client.get_clock.return_value = mock_clock
+
         with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
-
-            mock_clock = Mock()
-            mock_clock.is_open = True
-
-            mock_client = Mock()
-            mock_client.get_clock.return_value = mock_clock
-            MockClient.return_value = mock_client
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.account.ALPACA_AVAILABLE", True), \
+             patch("execution.services.account.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
 
@@ -223,14 +239,16 @@ class TestIsMarketOpen:
 class TestBrokerErrorHandling:
     """Test broker error handling."""
 
+    @requires_alpaca
     def test_get_account_handles_api_error(self):
         """Verify get_account handles API errors gracefully."""
-        with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
+        mock_client = Mock()
+        mock_client.get_account.side_effect = Exception("API Error")
 
-            mock_client = Mock()
-            mock_client.get_account.side_effect = Exception("API Error")
-            MockClient.return_value = mock_client
+        with patch("execution.broker.ALPACA_AVAILABLE", True), \
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.account.ALPACA_AVAILABLE", True), \
+             patch("execution.services.account.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
 
@@ -240,14 +258,16 @@ class TestBrokerErrorHandling:
             # Should return mock account on error
             assert account["account_number"] == "MOCK"
 
+    @requires_alpaca
     def test_submit_order_handles_rejection(self):
         """Verify submit_order handles rejection gracefully."""
-        with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
+        mock_client = Mock()
+        mock_client.submit_order.side_effect = Exception("Order rejected")
 
-            mock_client = Mock()
-            mock_client.submit_order.side_effect = Exception("Order rejected")
-            MockClient.return_value = mock_client
+        with patch("execution.broker.ALPACA_AVAILABLE", True), \
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.order.ALPACA_AVAILABLE", True), \
+             patch("execution.services.order.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
             from execution.orders import Order
@@ -275,36 +295,37 @@ class TestGetPositions:
 
             assert positions == []
 
+    @requires_alpaca
     def test_returns_all_positions(self):
         """Verify all positions returned."""
+        mock_client = Mock()
+        mock_pos1 = Mock()
+        mock_pos1.symbol = "TQQQ"
+        mock_pos1.qty = 100.0
+        mock_pos1.avg_entry_price = 45.0
+        mock_pos1.market_value = 4500.0
+        mock_pos1.cost_basis = 4500.0
+        mock_pos1.unrealized_pl = 0.0
+        mock_pos1.unrealized_plpc = 0.0
+        mock_pos1.current_price = 45.0
+        mock_pos1.side = "long"
+
+        mock_pos2 = Mock()
+        mock_pos2.symbol = "SQQQ"
+        mock_pos2.qty = 50.0
+        mock_pos2.avg_entry_price = 20.0
+        mock_pos2.market_value = 1000.0
+        mock_pos2.cost_basis = 1000.0
+        mock_pos2.unrealized_pl = 0.0
+        mock_pos2.unrealized_plpc = 0.0
+        mock_pos2.current_price = 20.0
+        mock_pos2.side = "long"
+        mock_client.get_all_positions.return_value = [mock_pos1, mock_pos2]
+
         with patch("execution.broker.ALPACA_AVAILABLE", True), \
-             patch("execution.broker.TradingClient") as MockClient:
-
-            mock_pos1 = Mock()
-            mock_pos1.symbol = "TQQQ"
-            mock_pos1.qty = 100.0
-            mock_pos1.avg_entry_price = 45.0
-            mock_pos1.market_value = 4500.0
-            mock_pos1.cost_basis = 4500.0
-            mock_pos1.unrealized_pl = 0.0
-            mock_pos1.unrealized_plpc = 0.0
-            mock_pos1.current_price = 45.0
-            mock_pos1.side = "long"
-
-            mock_pos2 = Mock()
-            mock_pos2.symbol = "SQQQ"
-            mock_pos2.qty = 50.0
-            mock_pos2.avg_entry_price = 20.0
-            mock_pos2.market_value = 1000.0
-            mock_pos2.cost_basis = 1000.0
-            mock_pos2.unrealized_pl = 0.0
-            mock_pos2.unrealized_plpc = 0.0
-            mock_pos2.current_price = 20.0
-            mock_pos2.side = "long"
-
-            mock_client = Mock()
-            mock_client.get_all_positions.return_value = [mock_pos1, mock_pos2]
-            MockClient.return_value = mock_client
+             patch("execution.broker.TradingClient", return_value=mock_client), \
+             patch("execution.services.account.ALPACA_AVAILABLE", True), \
+             patch("execution.services.account.TradingClient", return_value=mock_client):
 
             from execution.broker import AlpacaBroker
 

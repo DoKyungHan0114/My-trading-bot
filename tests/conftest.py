@@ -153,9 +153,10 @@ def mock_discord_notifier():
 @pytest.fixture
 def test_discord_webhook_url() -> str:
     """Return test Discord webhook URL from environment."""
-    url = os.getenv("DISCORD_TEST_WEBHOOK_URL", "")
+    # Try test-specific URL first, then fall back to main webhook URL
+    url = os.getenv("DISCORD_TEST_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL", "")
     if not url:
-        pytest.skip("DISCORD_TEST_WEBHOOK_URL not set")
+        pytest.skip("DISCORD_WEBHOOK_URL not set")
     return url
 
 
@@ -262,12 +263,12 @@ def temp_trades_file(tmp_path, sample_trades) -> Path:
 @pytest.fixture
 def mock_trading_bot(mock_settings, mock_broker):
     """Create TradingBot with mocked dependencies."""
-    with patch("trading_bot.FIRESTORE_AVAILABLE", False), \
-         patch("trading_bot.AlpacaBroker") as MockBroker, \
-         patch("trading_bot.DiscordNotifier") as MockDiscord, \
-         patch("trading_bot.DataFetcher") as MockFetcher, \
-         patch("trading_bot.TradeLogger") as MockLogger, \
-         patch("trading_bot.AuditTrail") as MockAudit:
+    with patch("src.trading_bot.FIRESTORE_AVAILABLE", False), \
+         patch("src.trading_bot.AlpacaBroker") as MockBroker, \
+         patch("src.trading_bot.DiscordNotifier") as MockDiscord, \
+         patch("src.trading_bot.DataFetcher") as MockFetcher, \
+         patch("src.trading_bot.TradeLogger") as MockLogger, \
+         patch("src.trading_bot.AuditTrail") as MockAudit:
 
         MockBroker.return_value = mock_broker
 
@@ -286,7 +287,7 @@ def mock_trading_bot(mock_settings, mock_broker):
         mock_audit = Mock()
         MockAudit.return_value = mock_audit
 
-        from trading_bot import TradingBot
+        from src.trading_bot import TradingBot
         bot = TradingBot(mode="paper")
         bot.broker = mock_broker
         bot.discord = mock_discord

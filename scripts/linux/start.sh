@@ -5,7 +5,8 @@
 
 set -e
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
 # Colors for output
@@ -67,7 +68,7 @@ fi
 
 # Start Backend (FastAPI)
 echo -e "${GREEN}Starting Backend API on http://localhost:8000${NC}"
-python3 api.py &
+python3 src/api.py &
 BACKEND_PID=$!
 
 # Wait for backend to start

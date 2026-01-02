@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config.settings import get_settings, configure_for_mode, StrategyConfig
 from config.constants import TradingMode, SYMBOL, INVERSE_SYMBOL
@@ -47,7 +47,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(Path(__file__).parent / "logs" / "trading.log"),
+        logging.FileHandler(Path(__file__).parent.parent / "logs" / "trading.log"),
     ],
 )
 logger = logging.getLogger(__name__)

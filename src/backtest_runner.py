@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -47,7 +47,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(Path(__file__).parent / "logs" / "backtest.log"),
+        logging.FileHandler(Path(__file__).parent.parent / "logs" / "backtest.log"),
     ],
 )
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def run_backtest(
         logger.info(f"Results saved to: {results_file}")
 
     # Save trades to logs/trades.json for Claude analysis
-    logs_dir = Path(__file__).parent / "logs"
+    logs_dir = Path(__file__).parent.parent / "logs"
     logs_dir.mkdir(exist_ok=True)
     trades_file = logs_dir / "trades.json"
     trades_for_claude = []

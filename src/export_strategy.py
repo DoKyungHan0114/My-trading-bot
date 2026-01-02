@@ -15,7 +15,7 @@ from pathlib import Path
 import importlib.util
 
 # Load constants.py directly without importing the config package
-constants_path = Path(__file__).parent / "config" / "constants.py"
+constants_path = Path(__file__).parent.parent / "config" / "constants.py"
 spec = importlib.util.spec_from_file_location("constants", constants_path)
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)

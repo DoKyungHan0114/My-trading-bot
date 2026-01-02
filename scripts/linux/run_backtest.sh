@@ -2,7 +2,9 @@
 # TQQQ Backtest Runner with Claude AI Analysis
 # Usage: ./run_backtest.sh [days_back] [capital]
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_DIR"
 
 # Default values
 DAYS_BACK="${1:-7}"
@@ -34,7 +36,7 @@ echo "[Step 1/3] Running Backtest..."
 echo "----------------------------------------------"
 
 # Run backtest with PDF generation and Firestore saving
-python backtest_runner.py \
+python src/backtest_runner.py \
     --start "$START_DATE" \
     --end "$END_DATE" \
     --capital "$CAPITAL" \

@@ -7,7 +7,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$ProjectRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+Set-Location $ProjectRoot
 
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  TQQQ Trading System (Production)" -ForegroundColor Green
@@ -21,15 +22,15 @@ if (!(Get-Command python -ErrorAction SilentlyContinue)) {
 }
 
 # Activate virtual environment
-& "$PSScriptRoot\venv\Scripts\Activate.ps1"
+& "$ProjectRoot\venv\Scripts\Activate.ps1"
 
 # Build frontend if dist doesn't exist or --Build flag
-if (!(Test-Path "$PSScriptRoot\frontend\dist") -or $Build) {
+if (!(Test-Path "$ProjectRoot\frontend\dist") -or $Build) {
     Write-Host "Building frontend..." -ForegroundColor Yellow
-    Set-Location "$PSScriptRoot\frontend"
+    Set-Location "$ProjectRoot\frontend"
     npm install
     npm run build
-    Set-Location $PSScriptRoot
+    Set-Location $ProjectRoot
 }
 
 Write-Host ""
@@ -45,7 +46,7 @@ Write-Host ""
 
 # Run server
 try {
-    python api.py
+    python src/api.py
 }
 finally {
     Write-Host ""

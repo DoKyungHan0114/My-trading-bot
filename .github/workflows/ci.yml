@@ -41,7 +41,7 @@ jobs:
 
       - name: Check import errors
         run: |
-          python -c "from trading_bot import TradingBot; print('trading_bot.py imports OK')"
+          python -c "from src.trading_bot import TradingBot; print('trading_bot.py imports OK')"
           python -c "from automation.scheduler import AutomationScheduler; print('scheduler imports OK')"
           python -c "from strategy.signals import SignalGenerator; print('signals imports OK')"
 
