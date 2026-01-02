@@ -73,14 +73,28 @@ jobs:
 
       - name: Deploy to GCE
         run: |
-          gcloud compute ssh ${{ env.INSTANCE_NAME }} \
+          # Use startup-script metadata to trigger update on next boot/reset
+          gcloud compute instances add-metadata ${{ env.INSTANCE_NAME }} \
             --zone=${{ env.ZONE }} \
-            --command="sudo docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest && sudo systemctl restart tqqq-trading-bot && sudo systemctl restart tqqq-discord-bot"
+            --metadata=deploy-version=${{ github.sha }}
+
+          # Reset instance to apply changes (triggers systemd to pull new image)
+          gcloud compute instances reset ${{ env.INSTANCE_NAME }} \
+            --zone=${{ env.ZONE }}
+
+          echo "Instance reset triggered. Waiting for startup..."
+          sleep 60
 
       - name: Verify deployment
         run: |
-          echo "Waiting for containers to start..."
-          sleep 10
-          gcloud compute ssh ${{ env.INSTANCE_NAME }} \
+          # Check instance status
+          STATUS=$(gcloud compute instances describe ${{ env.INSTANCE_NAME }} \
             --zone=${{ env.ZONE }} \
-            --command="docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'"
+            --format="value(status)")
+          echo "Instance status: $STATUS"
+
+          if [ "$STATUS" != "RUNNING" ]; then
+            echo "Instance is not running!"
+            exit 1
+          fi
+          echo "Deployment complete. Instance is running."
