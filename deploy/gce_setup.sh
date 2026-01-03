@@ -87,7 +87,7 @@ mkdir -p /opt/tqqq
 gcloud secrets versions access latest --secret="tqqq-env-file" > /opt/tqqq/.env 2>/dev/null || touch /opt/tqqq/.env
 
 # Create systemd service for trading bot
-cat > /etc/systemd/system/tqqq-trading-bot.service << 'SERVICE_EOF'
+cat > /etc/systemd/system/tqqq-trading-bot.service << SERVICE_EOF
 [Unit]
 Description=TQQQ Trading Bot (Docker)
 After=docker.service
@@ -99,11 +99,11 @@ Restart=always
 RestartSec=30
 ExecStartPre=-/usr/bin/docker stop tqqq-bot
 ExecStartPre=-/usr/bin/docker rm tqqq-bot
-ExecStart=/usr/bin/docker run --rm --name tqqq-bot \
-    --env-file /opt/tqqq/.env \
-    -v /opt/tqqq/logs:/app/logs \
-    ${IMAGE_URL} \
-    python src/trading_bot.py --mode paper
+ExecStartPre=/usr/bin/docker pull ${IMAGE_URL}
+ExecStart=/usr/bin/docker run --rm --name tqqq-bot \\
+    --env-file /opt/tqqq/.env \\
+    -v /opt/tqqq/logs:/app/logs \\
+    ${IMAGE_URL}
 ExecStop=/usr/bin/docker stop tqqq-bot
 
 [Install]

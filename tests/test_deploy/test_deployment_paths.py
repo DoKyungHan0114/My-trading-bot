@@ -56,22 +56,15 @@ class TestDockerfilePaths:
 class TestGCESetupPaths:
     """Validate Python paths in GCE setup script."""
 
-    def test_gce_trading_bot_service_path(self):
-        """Verify gce_setup.sh trading bot service uses correct path."""
+    def test_gce_trading_bot_service_uses_image_url(self):
+        """Verify gce_setup.sh trading bot service uses IMAGE_URL variable."""
         gce_setup = PROJECT_ROOT / "deploy" / "gce_setup.sh"
         content = gce_setup.read_text(encoding="utf-8")
 
-        # Find: python trading_bot.py or python src/trading_bot.py
-        matches = re.findall(r'python\s+([\w/]+trading_bot\.py)', content)
-        assert matches, "Could not find trading_bot.py reference in gce_setup.sh"
-
-        for python_path in matches:
-            full_path = PROJECT_ROOT / python_path
-
-            assert full_path.exists(), (
-                f"gce_setup.sh references '{python_path}' "
-                f"but file does not exist at {full_path}"
-            )
+        # Should reference IMAGE_URL in docker run command
+        assert "${IMAGE_URL}" in content, (
+            "gce_setup.sh should use ${IMAGE_URL} for the Docker image"
+        )
 
     def test_gce_discord_bot_service_path(self):
         """Verify gce_setup.sh discord bot service uses correct path."""
@@ -131,30 +124,47 @@ class TestGCESetupPaths:
 class TestPathConsistency:
     """Ensure paths are consistent across all deployment files."""
 
-    def test_trading_bot_path_consistency(self):
-        """Verify trading_bot.py path is same in Dockerfile and gce_setup.sh."""
+    def test_dockerfile_has_valid_cmd(self):
+        """Verify Dockerfile has a valid CMD that points to existing file."""
         dockerfile = PROJECT_ROOT / "deploy" / "Dockerfile.trading-bot"
-        gce_setup = PROJECT_ROOT / "deploy" / "gce_setup.sh"
 
-        # Get Dockerfile path
         dockerfile_content = dockerfile.read_text(encoding="utf-8")
         dockerfile_match = re.search(
-            r'CMD\s*\[\s*"python",\s*"([^"]+trading_bot\.py)"', dockerfile_content
+            r'CMD\s*\[\s*"python",\s*"([^"]+)"', dockerfile_content
         )
-        assert dockerfile_match, "Could not find trading_bot.py in Dockerfile"
-        dockerfile_path = dockerfile_match.group(1)
+        assert dockerfile_match, "Could not find CMD in Dockerfile"
+        python_path = dockerfile_match.group(1)
 
-        # Get gce_setup.sh path (multiline ExecStart with line continuations)
+        full_path = PROJECT_ROOT / python_path
+        assert full_path.exists(), (
+            f"Dockerfile CMD references '{python_path}' "
+            f"but file does not exist at {full_path}"
+        )
+
+    def test_gce_does_not_override_trading_bot_cmd(self):
+        """Verify gce_setup.sh doesn't override Docker CMD for trading bot."""
+        gce_setup = PROJECT_ROOT / "deploy" / "gce_setup.sh"
         gce_content = gce_setup.read_text(encoding="utf-8")
-        gce_match = re.search(
-            r'python\s+([\w/]+trading_bot\.py)\s+--mode\s+paper', gce_content
-        )
-        assert gce_match, "Could not find trading_bot.py in gce_setup.sh"
-        gce_path = gce_match.group(1)
 
-        assert dockerfile_path == gce_path, (
-            f"Path mismatch! Dockerfile uses '{dockerfile_path}' "
-            f"but gce_setup.sh uses '{gce_path}'"
+        # Find the trading-bot service section
+        trading_bot_section = re.search(
+            r'tqqq-trading-bot\.service.*?SERVICE_EOF',
+            gce_content,
+            re.DOTALL
+        )
+        assert trading_bot_section, "Could not find trading-bot service in gce_setup.sh"
+
+        section_content = trading_bot_section.group(0)
+
+        # ExecStart for trading bot should NOT have python command after IMAGE_URL
+        # This ensures Dockerfile CMD is used, making updates automatic
+        has_python_override = re.search(
+            r'ExecStart=.*\$\{IMAGE_URL\}\s*\\?\s*python',
+            section_content
+        )
+        assert not has_python_override, (
+            "Trading bot service should NOT override Docker CMD. "
+            "Remove the python command after ${IMAGE_URL} to use Dockerfile's default CMD."
         )
 
 
