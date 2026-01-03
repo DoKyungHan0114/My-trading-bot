@@ -103,7 +103,7 @@ ExecStart=/usr/bin/docker run --rm --name tqqq-bot \
     --env-file /opt/tqqq/.env \
     -v /opt/tqqq/logs:/app/logs \
     ${IMAGE_URL} \
-    python trading_bot.py --mode paper
+    python src/trading_bot.py --mode paper
 ExecStop=/usr/bin/docker stop tqqq-bot
 
 [Install]
