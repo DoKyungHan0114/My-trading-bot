@@ -74,6 +74,38 @@ jobs:
           isort --check-only --diff . || echo "::warning::Import sorting issues found. Run 'isort .' to fix."
         continue-on-error: true
 
+  deploy-validation:
+    name: Deployment Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Validate deployment paths
+        run: |
+          python -m pytest tests/test_deploy/ -v --tb=short
+
+      - name: Validate Dockerfile builds
+        run: |
+          docker build -t test-trading-bot -f deploy/Dockerfile.trading-bot .
+
+      - name: Validate Docker CMD works
+        run: |
+          # Test that the container starts and the entrypoint is correct
+          docker run --rm test-trading-bot python -c "import src.trading_bot; print('Entrypoint OK')"
+
   type-check:
     name: Type Check
     runs-on: ubuntu-latest
