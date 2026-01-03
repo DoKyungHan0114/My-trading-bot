@@ -98,3 +98,17 @@ jobs:
             exit 1
           fi
           echo "Deployment complete. Instance is running."
+
+      - name: Notify Discord - Success
+        if: success()
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d "{\"content\": \"✅ **배포 완료**\n\`${{ github.sha }}\`\n${{ github.event.head_commit.message }}\"}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+      - name: Notify Discord - Failure
+        if: failure()
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d "{\"content\": \"❌ **배포 실패**\n\`${{ github.sha }}\`\nhttps://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}
