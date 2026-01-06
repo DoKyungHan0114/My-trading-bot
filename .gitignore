@@ -79,3 +79,4 @@ rust/target/
 *.pem
 *.key
 service-account*.json
+nul
