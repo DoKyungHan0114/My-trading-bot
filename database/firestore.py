@@ -533,3 +533,138 @@ class FirestoreClient:
         except Exception as e:
             logger.error(f"Firestore health check failed: {e}")
             return False
+
+    # =========================================================================
+    # HEARTBEAT COLLECTION (for uptime tracking)
+    # =========================================================================
+
+    def record_heartbeat(
+        self,
+        status: str = "running",
+        market_open: bool = False,
+        signal_checked: bool = False,
+        position: dict = None,
+        error: str = None,
+    ) -> str:
+        """
+        Record a bot heartbeat for uptime tracking.
+
+        Args:
+            status: Bot status (running, error, skipped)
+            market_open: Whether market is open
+            signal_checked: Whether signals were checked
+            position: Current position info
+            error: Error message if any
+
+        Returns:
+            Heartbeat ID
+        """
+        heartbeat_id = str(uuid4())
+        now = datetime.utcnow()
+
+        doc = {
+            "heartbeat_id": heartbeat_id,
+            "timestamp": now,
+            "date": now.strftime("%Y-%m-%d"),
+            "status": status,
+            "market_open": market_open,
+            "signal_checked": signal_checked,
+            "position": position,
+            "error": error,
+        }
+
+        self._collection("heartbeats").document(heartbeat_id).set(doc)
+        logger.debug(f"Recorded heartbeat: {heartbeat_id}")
+        return heartbeat_id
+
+    def get_heartbeats_by_date(self, date: str) -> list[dict]:
+        """
+        Get all heartbeats for a specific date.
+
+        Args:
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            List of heartbeat documents
+        """
+        docs = (
+            self._collection("heartbeats")
+            .where(filter=FieldFilter("date", "==", date))
+            .order_by("timestamp", direction=firestore.Query.ASCENDING)
+            .stream()
+        )
+        return [doc.to_dict() for doc in docs]
+
+    def get_heartbeat_count_by_date(self, date: str) -> dict:
+        """
+        Get heartbeat statistics for a specific date.
+
+        Args:
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dict with total, market_open, signal_checked counts
+        """
+        heartbeats = self.get_heartbeats_by_date(date)
+
+        total = len(heartbeats)
+        market_open_count = sum(1 for h in heartbeats if h.get("market_open"))
+        signal_checked_count = sum(1 for h in heartbeats if h.get("signal_checked"))
+        error_count = sum(1 for h in heartbeats if h.get("error"))
+
+        # Get first and last heartbeat times
+        first_heartbeat = heartbeats[0]["timestamp"] if heartbeats else None
+        last_heartbeat = heartbeats[-1]["timestamp"] if heartbeats else None
+
+        return {
+            "date": date,
+            "total_heartbeats": total,
+            "market_open_heartbeats": market_open_count,
+            "signal_checked_heartbeats": signal_checked_count,
+            "error_count": error_count,
+            "first_heartbeat": first_heartbeat,
+            "last_heartbeat": last_heartbeat,
+        }
+
+    def cleanup_old_heartbeats(self, days_to_keep: int = 7) -> int:
+        """
+        Delete heartbeats older than specified days.
+
+        Args:
+            days_to_keep: Number of days to keep
+
+        Returns:
+            Number of deleted documents
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.utcnow() - timedelta(days=days_to_keep)
+        cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+        # Get old heartbeats
+        old_docs = (
+            self._collection("heartbeats")
+            .where(filter=FieldFilter("date", "<", cutoff_str))
+            .stream()
+        )
+
+        deleted = 0
+        batch = self.db.batch()
+        batch_count = 0
+
+        for doc in old_docs:
+            batch.delete(doc.reference)
+            batch_count += 1
+            deleted += 1
+
+            # Firestore batch limit is 500
+            if batch_count >= 500:
+                batch.commit()
+                batch = self.db.batch()
+                batch_count = 0
+
+        if batch_count > 0:
+            batch.commit()
+
+        logger.info(f"Cleaned up {deleted} old heartbeats")
+        return deleted

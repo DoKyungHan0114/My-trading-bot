@@ -399,22 +399,18 @@ Respond in this exact JSON format:
             "short_enabled",
         }
 
-        # Parameter validation ranges: (min, max, max_change_per_adjustment)
-        # NOTE: RSI ranges expanded based on Rust backtesting optimization
-        # Optimal found: RSI 48/55 with +22% return, 83% win rate
         numeric_ranges = {
-            "rsi_oversold": (30.0, 55.0, 10.0),  # Expanded: optimal ~48
-            "rsi_overbought": (52.0, 80.0, 10.0),  # Expanded: optimal ~55
-            "stop_loss_pct": (0.02, 0.10, 0.02),
-            "position_size_pct": (0.70, 0.95, 0.10),
-            "atr_stop_multiplier": (1.5, 3.0, 0.5),
-            "bb_std_dev": (1.5, 2.5, 0.5),
-            "volume_min_ratio": (0.5, 2.0, 0.5),
-            # Short parameters
-            "rsi_overbought_short": (75.0, 95.0, 10.0),
-            "rsi_oversold_short": (30.0, 60.0, 10.0),
-            "short_stop_loss_pct": (0.02, 0.05, 0.01),
-            "short_position_size_pct": (0.30, 0.60, 0.10),
+            "rsi_oversold": (5.0, 95.0, 50.0),
+            "rsi_overbought": (5.0, 95.0, 50.0),
+            "stop_loss_pct": (0.01, 0.20, 0.10),
+            "position_size_pct": (0.10, 1.0, 0.50),
+            "atr_stop_multiplier": (0.5, 5.0, 2.0),
+            "bb_std_dev": (0.5, 4.0, 2.0),
+            "volume_min_ratio": (0.1, 3.0, 1.5),
+            "rsi_overbought_short": (5.0, 95.0, 50.0),
+            "rsi_oversold_short": (5.0, 95.0, 50.0),
+            "short_stop_loss_pct": (0.01, 0.20, 0.10),
+            "short_position_size_pct": (0.10, 1.0, 0.50),
         }
 
         # Apply each modification
@@ -504,7 +500,7 @@ Respond in this exact JSON format:
         self,
         report: Optional[AnalysisReport] = None,
         auto_apply: bool = False,
-        min_confidence: float = 0.75,  # 높은 신뢰도에서만 적용
+        min_confidence: float = 0.5,  # 높은 신뢰도에서만 적용
         cooldown_days: int = 3,  # 전략 변경 후 최소 대기 일수
     ) -> Optional[AnalysisResult]:
         """

@@ -6,6 +6,7 @@ use clap::Parser;
 use backtest_engine::{
     generate_synthetic_bars, load_file, BacktestEngine, BacktestParameters, BacktestResult,
 };
+use common::RealisticExecutionConfig;
 
 #[derive(Parser, Debug)]
 #[command(name = "backtest-engine")]
@@ -72,10 +73,29 @@ struct Args {
     /// Initial price for synthetic data
     #[arg(long, default_value = "50.0")]
     initial_price: f64,
+
+    /// Enable realistic execution simulation
+    #[arg(long)]
+    realistic: bool,
+
+    /// Enable pessimistic (worst-case) execution simulation
+    #[arg(long)]
+    pessimistic: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Build execution config
+    let execution = if args.pessimistic {
+        eprintln!("Using PESSIMISTIC execution simulation (worst-case)");
+        RealisticExecutionConfig::pessimistic()
+    } else if args.realistic {
+        eprintln!("Using REALISTIC execution simulation");
+        RealisticExecutionConfig::realistic()
+    } else {
+        RealisticExecutionConfig::default()
+    };
 
     // Build parameters
     let params = BacktestParameters {
@@ -89,6 +109,7 @@ fn main() -> Result<()> {
         short_enabled: args.short_enabled,
         vwap_filter_enabled: !args.no_vwap_filter,
         initial_capital: args.capital,
+        execution,
         ..Default::default()
     };
 

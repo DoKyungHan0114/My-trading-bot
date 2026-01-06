@@ -299,8 +299,12 @@ async def get_status():
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
-    firestore = get_firestore()
-    firestore_ok = firestore.health_check() if firestore else False
+    try:
+        firestore = get_firestore()
+        firestore_ok = firestore.health_check() if firestore else False
+    except Exception as e:
+        logger.error(f"Health check Firestore error: {e}")
+        firestore_ok = False
 
     return {
         "status": "healthy",
@@ -348,9 +352,24 @@ async def trading_tick():
     """
     Execute one trading tick - called by Cloud Scheduler every minute.
     Checks for signals and executes trades if conditions are met.
+    Records heartbeat to Firestore for uptime tracking.
     """
+    firestore = get_firestore()
     bot = get_trading_bot()
+
     if not bot:
+        # Record heartbeat even on error
+        if firestore:
+            try:
+                firestore.record_heartbeat(
+                    status="error",
+                    market_open=False,
+                    signal_checked=False,
+                    error="Trading system not available",
+                )
+            except Exception as hb_err:
+                logger.warning(f"Failed to record heartbeat: {hb_err}")
+
         return TradingTickResponse(
             status="error",
             message="Trading system not available",
@@ -364,6 +383,17 @@ async def trading_tick():
         market_open = bot.broker.is_market_open()
 
         if not market_open:
+            # Record heartbeat for market closed
+            if firestore:
+                try:
+                    firestore.record_heartbeat(
+                        status="skipped",
+                        market_open=False,
+                        signal_checked=False,
+                    )
+                except Exception as hb_err:
+                    logger.warning(f"Failed to record heartbeat: {hb_err}")
+
             return TradingTickResponse(
                 status="skipped",
                 message="Market is closed",
@@ -390,6 +420,18 @@ async def trading_tick():
                 "unrealized_pl": position["unrealized_pl"],
             }
 
+        # Record successful heartbeat
+        if firestore:
+            try:
+                firestore.record_heartbeat(
+                    status="success",
+                    market_open=True,
+                    signal_checked=True,
+                    position=position_dict,
+                )
+            except Exception as hb_err:
+                logger.warning(f"Failed to record heartbeat: {hb_err}")
+
         return TradingTickResponse(
             status="success",
             message="Trading tick completed",
@@ -401,6 +443,19 @@ async def trading_tick():
 
     except Exception as e:
         logger.exception(f"Trading tick error: {e}")
+
+        # Record error heartbeat
+        if firestore:
+            try:
+                firestore.record_heartbeat(
+                    status="error",
+                    market_open=False,
+                    signal_checked=False,
+                    error=str(e)[:500],  # Truncate long errors
+                )
+            except Exception as hb_err:
+                logger.warning(f"Failed to record heartbeat: {hb_err}")
+
         return TradingTickResponse(
             status="error",
             message=str(e),
@@ -553,10 +608,14 @@ class CommandResult(BaseModel):
 @app.get("/api/commands", response_model=list[CommandInfo])
 async def list_commands():
     """List available commands"""
-    return [
-        CommandInfo(id=cmd_id, name=cmd["name"], description=cmd["description"])
-        for cmd_id, cmd in COMMANDS.items()
-    ]
+    try:
+        return [
+            CommandInfo(id=cmd_id, name=cmd["name"], description=cmd["description"])
+            for cmd_id, cmd in COMMANDS.items()
+        ]
+    except Exception as e:
+        logger.error(f"Failed to list commands: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/commands/{command_id}/run")

@@ -158,6 +158,8 @@ After=docker.service
 Type=oneshot
 ExecStart=/usr/bin/docker run --rm \
     --env-file /opt/tqqq/.env \
+    -v /opt/tqqq/logs:/app/logs \
+    -v /opt/tqqq/reports:/app/reports \
     ${IMAGE_URL} \
     python automation/daily_report.py
 
@@ -186,6 +188,8 @@ After=docker.service
 Type=oneshot
 ExecStart=/usr/bin/docker run --rm \
     --env-file /opt/tqqq/.env \
+    -v /opt/tqqq/logs:/app/logs \
+    -v /opt/tqqq/reports:/app/reports \
     ${IMAGE_URL} \
     python automation/weekly_report.py
 

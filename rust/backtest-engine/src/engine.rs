@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use common::{BacktestParameters, BacktestResult, Bar, PositionSide, SignalType};
+use common::{BacktestParameters, BacktestResult, Bar, PositionSide, Side, SignalType};
 
+use crate::execution::ExecutionSimulator;
 use crate::indicators::{IndicatorSeries, IndicatorValues};
 use crate::metrics::MetricsCalculator;
 use crate::portfolio::Portfolio;
@@ -48,6 +49,10 @@ impl BacktestEngine {
         // Initialize components
         let mut portfolio = Portfolio::new(self.params.initial_capital);
         let signal_generator = SignalGenerator::new(&self.params);
+        let mut execution_sim = ExecutionSimulator::new(self.params.execution.clone());
+
+        // Calculate volatility for each bar (for execution simulation)
+        let volatilities = self.calculate_volatilities(&closes, 20);
 
         // Equity curve tracking
         let mut equity_curve: Vec<(DateTime<Utc>, f64)> = Vec::with_capacity(bars.len());
@@ -56,6 +61,7 @@ impl BacktestEngine {
         for i in warmup..bars.len() {
             let bar = &bars[i];
             let hedge_bar = hedge_bars.and_then(|h| h.get(i));
+            let volatility = volatilities.get(i).copied();
 
             // Get indicator values for this bar
             let mut ind_values = indicators.get(i);
@@ -65,13 +71,19 @@ impl BacktestEngine {
                 ind_values.prev_low = Some(bars[i - 1].low);
             }
 
+            // Process any pending orders from latency simulation
+            self.process_pending_orders(&mut portfolio, &mut execution_sim, bar, hedge_bar, i, volatility);
+
             // Generate and execute signals
             self.process_signals(
                 &mut portfolio,
                 &signal_generator,
+                &mut execution_sim,
                 bar,
                 hedge_bar,
                 &ind_values,
+                i,
+                volatility,
             );
 
             // Update portfolio prices
@@ -124,13 +136,22 @@ impl BacktestEngine {
         &self,
         portfolio: &mut Portfolio,
         signal_generator: &SignalGenerator,
+        execution_sim: &mut ExecutionSimulator,
         bar: &Bar,
         hedge_bar: Option<&Bar>,
         indicators: &IndicatorValues,
+        bar_index: usize,
+        volatility: Option<f64>,
     ) {
         // Check for stop loss first
         if portfolio.has_position() && portfolio.check_stop_loss(bar.close) {
-            portfolio.close_position(bar.close, bar.timestamp, "stop loss", self.params.commission);
+            let exec_result = execution_sim.simulate_execution(bar, Side::Sell, 0.0, volatility);
+            let exit_price = if exec_result.executed {
+                exec_result.fill_price
+            } else {
+                bar.close
+            };
+            portfolio.close_position(exit_price, bar.timestamp, "stop loss", self.params.commission);
             return;
         }
 
@@ -146,11 +167,34 @@ impl BacktestEngine {
         if let Some(sig) = signal {
             match sig.signal_type {
                 SignalType::Buy => {
-                    self.execute_buy(portfolio, bar, indicators);
+                    if execution_sim.has_latency() {
+                        // Queue order for delayed execution
+                        let quantity = portfolio.calculate_position_size(
+                            bar.close,
+                            self.params.position_size_pct,
+                            self.params.cash_reserve_pct,
+                        );
+                        if quantity >= 1.0 {
+                            execution_sim.queue_order(
+                                self.params.symbol.clone(),
+                                Side::Buy,
+                                quantity,
+                                bar_index,
+                            );
+                        }
+                    } else {
+                        self.execute_buy(portfolio, execution_sim, bar, indicators, volatility);
+                    }
                 }
                 SignalType::Sell => {
+                    let exec_result = execution_sim.simulate_execution(bar, Side::Sell, 0.0, volatility);
+                    let exit_price = if exec_result.executed {
+                        exec_result.fill_price
+                    } else {
+                        bar.close
+                    };
                     portfolio.close_position(
-                        bar.close,
+                        exit_price,
                         bar.timestamp,
                         &sig.reason,
                         self.params.commission,
@@ -158,13 +202,35 @@ impl BacktestEngine {
                 }
                 SignalType::HedgeBuy => {
                     if let Some(hbar) = hedge_bar {
-                        self.execute_hedge_buy(portfolio, hbar);
+                        if execution_sim.has_latency() {
+                            let quantity = portfolio.calculate_position_size(
+                                hbar.close,
+                                self.params.short_position_size_pct,
+                                self.params.cash_reserve_pct,
+                            );
+                            if quantity >= 1.0 {
+                                execution_sim.queue_order(
+                                    self.params.inverse_symbol.clone(),
+                                    Side::HedgeBuy,
+                                    quantity,
+                                    bar_index,
+                                );
+                            }
+                        } else {
+                            self.execute_hedge_buy(portfolio, execution_sim, hbar, volatility);
+                        }
                     }
                 }
                 SignalType::HedgeSell => {
                     if let Some(hbar) = hedge_bar {
+                        let exec_result = execution_sim.simulate_execution(hbar, Side::HedgeSell, 0.0, volatility);
+                        let exit_price = if exec_result.executed {
+                            exec_result.fill_price
+                        } else {
+                            hbar.close
+                        };
                         portfolio.close_hedge_position(
-                            hbar.close,
+                            exit_price,
                             hbar.timestamp,
                             &sig.reason,
                             self.params.commission,
@@ -176,8 +242,15 @@ impl BacktestEngine {
         }
     }
 
-    /// Execute buy order
-    fn execute_buy(&self, portfolio: &mut Portfolio, bar: &Bar, indicators: &IndicatorValues) {
+    /// Execute buy order with realistic execution simulation
+    fn execute_buy(
+        &self,
+        portfolio: &mut Portfolio,
+        execution_sim: &mut ExecutionSimulator,
+        bar: &Bar,
+        _indicators: &IndicatorValues,
+        volatility: Option<f64>,
+    ) {
         let quantity = portfolio.calculate_position_size(
             bar.close,
             self.params.position_size_pct,
@@ -188,17 +261,24 @@ impl BacktestEngine {
             return;
         }
 
-        // Calculate stop loss price
+        // Simulate execution
+        let exec_result = execution_sim.simulate_execution(bar, Side::Buy, quantity, volatility);
+
+        if !exec_result.executed || exec_result.fill_quantity < 1.0 {
+            return; // Order rejected or insufficient fill
+        }
+
+        // Calculate stop loss price based on actual fill price
         let stop_loss_price = if self.params.stop_loss_pct > 0.0 {
-            Some(bar.close * (1.0 - self.params.stop_loss_pct))
+            Some(exec_result.fill_price * (1.0 - self.params.stop_loss_pct))
         } else {
             None
         };
 
         let _ = portfolio.open_position(
             &self.params.symbol,
-            quantity,
-            bar.close * (1.0 + self.params.slippage_pct),
+            exec_result.fill_quantity,
+            exec_result.fill_price,
             PositionSide::Long,
             bar.timestamp,
             stop_loss_price,
@@ -206,8 +286,14 @@ impl BacktestEngine {
         );
     }
 
-    /// Execute hedge buy order
-    fn execute_hedge_buy(&self, portfolio: &mut Portfolio, bar: &Bar) {
+    /// Execute hedge buy order with realistic execution simulation
+    fn execute_hedge_buy(
+        &self,
+        portfolio: &mut Portfolio,
+        execution_sim: &mut ExecutionSimulator,
+        bar: &Bar,
+        volatility: Option<f64>,
+    ) {
         let quantity = portfolio.calculate_position_size(
             bar.close,
             self.params.short_position_size_pct,
@@ -218,21 +304,112 @@ impl BacktestEngine {
             return;
         }
 
+        // Simulate execution
+        let exec_result = execution_sim.simulate_execution(bar, Side::HedgeBuy, quantity, volatility);
+
+        if !exec_result.executed || exec_result.fill_quantity < 1.0 {
+            return; // Order rejected or insufficient fill
+        }
+
         let stop_loss_price = if self.params.short_stop_loss_pct > 0.0 {
-            Some(bar.close * (1.0 - self.params.short_stop_loss_pct))
+            Some(exec_result.fill_price * (1.0 - self.params.short_stop_loss_pct))
         } else {
             None
         };
 
         let _ = portfolio.open_position(
             &self.params.inverse_symbol,
-            quantity,
-            bar.close * (1.0 + self.params.slippage_pct),
+            exec_result.fill_quantity,
+            exec_result.fill_price,
             PositionSide::Hedge,
             bar.timestamp,
             stop_loss_price,
             self.params.commission,
         );
+    }
+
+    /// Process pending orders from latency simulation
+    fn process_pending_orders(
+        &self,
+        portfolio: &mut Portfolio,
+        execution_sim: &mut ExecutionSimulator,
+        bar: &Bar,
+        hedge_bar: Option<&Bar>,
+        bar_index: usize,
+        volatility: Option<f64>,
+    ) {
+        let pending_orders = execution_sim.get_executable_orders(bar_index);
+
+        for order in pending_orders {
+            match order.side {
+                Side::Buy => {
+                    let exec_result = execution_sim.simulate_execution(bar, Side::Buy, order.quantity, volatility);
+                    if exec_result.executed && exec_result.fill_quantity >= 1.0 {
+                        let stop_loss_price = if self.params.stop_loss_pct > 0.0 {
+                            Some(exec_result.fill_price * (1.0 - self.params.stop_loss_pct))
+                        } else {
+                            None
+                        };
+                        let _ = portfolio.open_position(
+                            &order.symbol,
+                            exec_result.fill_quantity,
+                            exec_result.fill_price,
+                            PositionSide::Long,
+                            bar.timestamp,
+                            stop_loss_price,
+                            self.params.commission,
+                        );
+                    }
+                }
+                Side::HedgeBuy => {
+                    if let Some(hbar) = hedge_bar {
+                        let exec_result = execution_sim.simulate_execution(hbar, Side::HedgeBuy, order.quantity, volatility);
+                        if exec_result.executed && exec_result.fill_quantity >= 1.0 {
+                            let stop_loss_price = if self.params.short_stop_loss_pct > 0.0 {
+                                Some(exec_result.fill_price * (1.0 - self.params.short_stop_loss_pct))
+                            } else {
+                                None
+                            };
+                            let _ = portfolio.open_position(
+                                &order.symbol,
+                                exec_result.fill_quantity,
+                                exec_result.fill_price,
+                                PositionSide::Hedge,
+                                hbar.timestamp,
+                                stop_loss_price,
+                                self.params.commission,
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Calculate rolling volatility for each bar
+    fn calculate_volatilities(&self, closes: &[f64], period: usize) -> Vec<f64> {
+        let mut volatilities = vec![0.0; closes.len()];
+
+        if closes.len() < period + 1 {
+            return volatilities;
+        }
+
+        // Calculate returns
+        let returns: Vec<f64> = closes
+            .windows(2)
+            .map(|w| (w[1] / w[0]).ln())
+            .collect();
+
+        // Calculate rolling standard deviation of returns
+        for i in period..returns.len() {
+            let window = &returns[i - period..i];
+            let mean: f64 = window.iter().sum::<f64>() / period as f64;
+            let variance: f64 = window.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / period as f64;
+            volatilities[i + 1] = variance.sqrt() * (252_f64).sqrt(); // Annualized
+        }
+
+        volatilities
     }
 
     /// Create empty result for insufficient data

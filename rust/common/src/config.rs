@@ -1,5 +1,116 @@
 use serde::{Deserialize, Serialize};
 
+/// Realistic execution simulation settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealisticExecutionConfig {
+    /// Enable realistic execution simulation
+    pub enabled: bool,
+
+    // === Slippage Settings ===
+    /// Minimum slippage (can be negative for favorable fills)
+    pub slippage_min_pct: f64,
+    /// Maximum slippage (typically positive, unfavorable)
+    pub slippage_max_pct: f64,
+    /// Probability of unfavorable slippage (0.0 - 1.0)
+    pub slippage_adverse_probability: f64,
+
+    // === Spread Settings ===
+    /// Enable bid/ask spread simulation
+    pub spread_enabled: bool,
+    /// Base spread as percentage of price
+    pub spread_base_pct: f64,
+    /// Additional spread during high volatility (multiplier)
+    pub spread_volatility_multiplier: f64,
+
+    // === Volume Constraints ===
+    /// Enable volume-based fill constraints
+    pub volume_limit_enabled: bool,
+    /// Maximum percentage of bar volume that can be filled
+    pub volume_participation_max_pct: f64,
+    /// Enable partial fills when order exceeds volume limit
+    pub partial_fill_enabled: bool,
+
+    // === Latency Simulation ===
+    /// Number of bars to delay order execution (0 = same bar)
+    pub latency_bars: usize,
+
+    // === Market Impact ===
+    /// Enable market impact simulation for large orders
+    pub market_impact_enabled: bool,
+    /// Impact factor: price moves by this % per 1% of daily volume
+    pub market_impact_factor: f64,
+
+    // === Order Rejection ===
+    /// Enable random order rejection
+    pub rejection_enabled: bool,
+    /// Base probability of order rejection (0.0 - 1.0)
+    pub rejection_base_probability: f64,
+    /// Additional rejection probability during high volatility
+    pub rejection_volatility_multiplier: f64,
+}
+
+impl Default for RealisticExecutionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+
+            // Slippage: -0.1% to +0.2%, 70% chance of adverse
+            slippage_min_pct: -0.001,
+            slippage_max_pct: 0.002,
+            slippage_adverse_probability: 0.7,
+
+            // Spread: 0.05% base spread
+            spread_enabled: true,
+            spread_base_pct: 0.0005,
+            spread_volatility_multiplier: 2.0,
+
+            // Volume: max 2% of daily volume per order
+            volume_limit_enabled: true,
+            volume_participation_max_pct: 0.02,
+            partial_fill_enabled: true,
+
+            // Latency: execute on same bar (0) or next bar (1)
+            latency_bars: 0,
+
+            // Market impact: 0.1% price impact per 1% volume
+            market_impact_enabled: true,
+            market_impact_factor: 0.001,
+
+            // Rejection: 0.5% base rejection rate
+            rejection_enabled: false,
+            rejection_base_probability: 0.005,
+            rejection_volatility_multiplier: 2.0,
+        }
+    }
+}
+
+impl RealisticExecutionConfig {
+    /// Preset for conservative/realistic simulation
+    pub fn realistic() -> Self {
+        Self {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// Preset for aggressive/pessimistic simulation
+    pub fn pessimistic() -> Self {
+        Self {
+            enabled: true,
+            slippage_min_pct: 0.0,
+            slippage_max_pct: 0.005,
+            slippage_adverse_probability: 0.9,
+            spread_base_pct: 0.001,
+            spread_volatility_multiplier: 3.0,
+            volume_participation_max_pct: 0.01,
+            market_impact_factor: 0.002,
+            rejection_enabled: true,
+            rejection_base_probability: 0.01,
+            ..Default::default()
+        }
+    }
+}
+
 /// Backtest parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestParameters {
@@ -35,6 +146,9 @@ pub struct BacktestParameters {
     pub initial_capital: f64,
     pub commission: f64,
     pub slippage_pct: f64,
+    // Realistic execution simulation
+    #[serde(default)]
+    pub execution: RealisticExecutionConfig,
 }
 
 impl Default for BacktestParameters {
@@ -65,6 +179,7 @@ impl Default for BacktestParameters {
             initial_capital: 10000.0,
             commission: 0.0,
             slippage_pct: 0.001,
+            execution: RealisticExecutionConfig::default(),
         }
     }
 }

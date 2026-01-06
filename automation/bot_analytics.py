@@ -1,6 +1,7 @@
 """
 Bot Analytics Module
 Calculates bot uptime and analyzes reasons for no trades.
+Supports both Firestore heartbeats (Cloud Run) and log files (GCE).
 """
 import json
 import logging
@@ -11,6 +12,13 @@ from pathlib import Path
 from typing import Optional
 
 import pytz
+
+# Try to import Firestore client
+try:
+    from database.firestore import FirestoreClient
+    FIRESTORE_AVAILABLE = True
+except ImportError:
+    FIRESTORE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -77,18 +85,110 @@ def parse_log_timestamp(log_line: str, system_tz: str = "Australia/Brisbane") ->
         return None
 
 
+def calculate_daily_uptime_from_firestore(
+    date: Optional[str] = None,
+    firestore_client: Optional["FirestoreClient"] = None,
+) -> Optional[UptimeStats]:
+    """
+    Calculate bot uptime from Firestore heartbeats.
+
+    Args:
+        date: Date string (YYYY-MM-DD) in ET, defaults to today
+        firestore_client: Optional Firestore client instance
+
+    Returns:
+        UptimeStats for the day, or None if Firestore not available
+    """
+    if not FIRESTORE_AVAILABLE:
+        return None
+
+    if date is None:
+        date = datetime.now(ET).strftime("%Y-%m-%d")
+
+    target_date = datetime.strptime(date, "%Y-%m-%d")
+
+    # Check if weekend
+    if target_date.weekday() >= 5:
+        return UptimeStats(
+            date=date,
+            market_minutes=0,
+            bot_running_minutes=0,
+            uptime_pct=0.0,
+            start_events=0,
+            stop_events=0,
+            errors=["Weekend - market closed"],
+        )
+
+    try:
+        # Initialize Firestore client if not provided
+        if firestore_client is None:
+            firestore_client = FirestoreClient()
+
+        # Get heartbeat stats for the date
+        stats = firestore_client.get_heartbeat_count_by_date(date)
+
+        total_heartbeats = stats.get("total_heartbeats", 0)
+        market_open_heartbeats = stats.get("market_open_heartbeats", 0)
+        signal_checked = stats.get("signal_checked_heartbeats", 0)
+        error_count = stats.get("error_count", 0)
+
+        # Cloud Scheduler runs every minute during market hours (390 minutes)
+        # Calculate uptime based on successful heartbeats during market hours
+        # market_open_heartbeats = heartbeats when market was open and bot was active
+        if total_heartbeats == 0:
+            return UptimeStats(
+                date=date,
+                market_minutes=MARKET_MINUTES_PER_DAY,
+                bot_running_minutes=0,
+                uptime_pct=0.0,
+                start_events=0,
+                stop_events=0,
+                errors=["No heartbeats recorded"],
+            )
+
+        # Each heartbeat represents ~1 minute of operation
+        # Use signal_checked as the most accurate measure of active trading
+        bot_running_minutes = signal_checked
+
+        # Calculate percentage based on market hours
+        uptime_pct = (bot_running_minutes / MARKET_MINUTES_PER_DAY * 100) if MARKET_MINUTES_PER_DAY > 0 else 0
+        uptime_pct = min(100.0, uptime_pct)
+
+        # Collect errors from heartbeats
+        errors = []
+        if error_count > 0:
+            errors.append(f"{error_count} error(s) during execution")
+
+        return UptimeStats(
+            date=date,
+            market_minutes=MARKET_MINUTES_PER_DAY,
+            bot_running_minutes=bot_running_minutes,
+            uptime_pct=round(uptime_pct, 1),
+            start_events=total_heartbeats,  # Total heartbeats as "events"
+            stop_events=0,
+            errors=errors,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to calculate uptime from Firestore: {e}")
+        return None
+
+
 def calculate_daily_uptime(
     log_file: str = "logs/trading.log",
     date: Optional[str] = None,
     system_tz: str = "Australia/Brisbane",
+    use_firestore: bool = True,
 ) -> UptimeStats:
     """
     Calculate bot uptime for a specific day.
+    Tries Firestore heartbeats first, falls back to log file parsing.
 
     Args:
         log_file: Path to trading log file
         date: Date string (YYYY-MM-DD) in ET, defaults to today
         system_tz: System timezone for log timestamps
+        use_firestore: Whether to try Firestore first (default True)
 
     Returns:
         UptimeStats for the day
@@ -96,6 +196,16 @@ def calculate_daily_uptime(
     if date is None:
         date = datetime.now(ET).strftime("%Y-%m-%d")
 
+    # Try Firestore first if available and enabled
+    if use_firestore and FIRESTORE_AVAILABLE:
+        firestore_stats = calculate_daily_uptime_from_firestore(date)
+        if firestore_stats is not None:
+            # Check if we got meaningful data (not just "no heartbeats")
+            if firestore_stats.start_events > 0 or "Weekend" in str(firestore_stats.errors):
+                logger.info(f"Using Firestore heartbeats for uptime: {firestore_stats.uptime_pct}%")
+                return firestore_stats
+
+    # Fall back to log file parsing
     target_date = datetime.strptime(date, "%Y-%m-%d")
     market_open = ET.localize(
         datetime(target_date.year, target_date.month, target_date.day,
@@ -122,6 +232,10 @@ def calculate_daily_uptime(
         with open(log_file, "r") as f:
             lines = f.readlines()
     except FileNotFoundError:
+        # If both Firestore and log file fail, return no data error
+        error_msg = "No uptime data available (Firestore: no heartbeats, Log: file not found)"
+        if not FIRESTORE_AVAILABLE:
+            error_msg = "Log file not found (Firestore not available)"
         return UptimeStats(
             date=date,
             market_minutes=MARKET_MINUTES_PER_DAY,
@@ -129,7 +243,7 @@ def calculate_daily_uptime(
             uptime_pct=0.0,
             start_events=0,
             stop_events=0,
-            errors=["Log file not found"],
+            errors=[error_msg],
         )
 
     # Track bot state
@@ -204,9 +318,16 @@ def calculate_daily_uptime(
 def calculate_weekly_uptime(
     log_file: str = "logs/trading.log",
     system_tz: str = "Australia/Brisbane",
+    use_firestore: bool = True,
 ) -> list[UptimeStats]:
     """
     Calculate bot uptime for the current week.
+    Tries Firestore heartbeats first, falls back to log file parsing.
+
+    Args:
+        log_file: Path to trading log file
+        system_tz: System timezone for log timestamps
+        use_firestore: Whether to try Firestore first (default True)
 
     Returns:
         List of UptimeStats for each trading day
@@ -221,7 +342,12 @@ def calculate_weekly_uptime(
     for i in range(5):  # Mon-Fri
         day = monday + timedelta(days=i)
         if day.date() <= now_et.date():  # Only past and today
-            stats = calculate_daily_uptime(log_file, day.strftime("%Y-%m-%d"), system_tz)
+            stats = calculate_daily_uptime(
+                log_file,
+                day.strftime("%Y-%m-%d"),
+                system_tz,
+                use_firestore=use_firestore,
+            )
             weekly_stats.append(stats)
 
     return weekly_stats
