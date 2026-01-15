@@ -79,14 +79,77 @@ jobs:
               --project=${{ env.PROJECT_ID }} &>/dev/null; then
             echo "Instance does not exist. Creating new instance..."
 
-            # Run the GCE setup script to create the instance
-            chmod +x deploy/gce_setup.sh
-            GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }} \
-            GCE_ZONE=${{ env.ZONE }} \
-            GCE_REGION=${{ env.REGION }} \
-            GCE_INSTANCE=${{ env.INSTANCE_NAME }} \
-            IMAGE_TAG=latest \
-            ./deploy/gce_setup.sh
+            # Create a basic startup script
+            cat > /tmp/startup-script.sh << 'STARTUP_EOF'
+          #!/bin/bash
+          set -e
+
+          # Install Docker
+          if ! command -v docker &> /dev/null; then
+              apt-get update
+              apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+              curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+              echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+              apt-get update
+              apt-get install -y docker-ce docker-ce-cli containerd.io
+              systemctl enable docker
+              systemctl start docker
+          fi
+
+          # Configure Docker to use Artifact Registry
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+          # Create directories
+          mkdir -p /opt/tqqq/logs /opt/tqqq/reports
+
+          # Get env file from Secret Manager
+          gcloud secrets versions access latest --secret="tqqq-env-file" > /opt/tqqq/.env 2>/dev/null || touch /opt/tqqq/.env
+
+          # Pull and run the trading bot
+          docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
+
+          # Create systemd service
+          cat > /etc/systemd/system/tqqq-trading-bot.service << 'SERVICE_EOF'
+          [Unit]
+          Description=TQQQ Trading Bot (Docker)
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          Restart=always
+          RestartSec=30
+          ExecStartPre=-/usr/bin/docker stop tqqq-bot
+          ExecStartPre=-/usr/bin/docker rm tqqq-bot
+          ExecStartPre=/usr/bin/docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
+          ExecStart=/usr/bin/docker run --rm --name tqqq-bot \
+              --env-file /opt/tqqq/.env \
+              -v /opt/tqqq/logs:/app/logs \
+              ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
+          ExecStop=/usr/bin/docker stop tqqq-bot
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE_EOF
+
+          # Enable and start service
+          systemctl daemon-reload
+          systemctl enable tqqq-trading-bot
+          systemctl start tqqq-trading-bot
+          STARTUP_EOF
+
+            # Create instance with basic configuration
+            gcloud compute instances create ${{ env.INSTANCE_NAME }} \
+              --zone=${{ env.ZONE }} \
+              --machine-type=e2-small \
+              --scopes=cloud-platform \
+              --image-family=debian-12 \
+              --image-project=debian-cloud \
+              --boot-disk-size=20GB \
+              --boot-disk-type=pd-standard \
+              --metadata-from-file=startup-script=/tmp/startup-script.sh \
+              --tags=tqqq-runner \
+              --project=${{ env.PROJECT_ID }}
 
             echo "Instance created. Waiting for startup to complete..."
             sleep 120
