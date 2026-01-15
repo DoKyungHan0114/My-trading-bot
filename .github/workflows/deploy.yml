@@ -73,17 +73,38 @@ jobs:
 
       - name: Deploy to GCE
         run: |
-          # Use startup-script metadata to trigger update on next boot/reset
-          gcloud compute instances add-metadata ${{ env.INSTANCE_NAME }} \
-            --zone=${{ env.ZONE }} \
-            --metadata=deploy-version=${{ github.sha }}
+          # Check if instance exists
+          if ! gcloud compute instances describe ${{ env.INSTANCE_NAME }} \
+              --zone=${{ env.ZONE }} \
+              --project=${{ env.PROJECT_ID }} &>/dev/null; then
+            echo "Instance does not exist. Creating new instance..."
 
-          # Reset instance to apply changes (triggers systemd to pull new image)
-          gcloud compute instances reset ${{ env.INSTANCE_NAME }} \
-            --zone=${{ env.ZONE }}
+            # Run the GCE setup script to create the instance
+            chmod +x deploy/gce_setup.sh
+            GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }} \
+            GCE_ZONE=${{ env.ZONE }} \
+            GCE_REGION=${{ env.REGION }} \
+            GCE_INSTANCE=${{ env.INSTANCE_NAME }} \
+            IMAGE_TAG=latest \
+            ./deploy/gce_setup.sh
 
-          echo "Instance reset triggered. Waiting for startup..."
-          sleep 60
+            echo "Instance created. Waiting for startup to complete..."
+            sleep 120
+          else
+            echo "Instance exists. Updating..."
+
+            # Use startup-script metadata to trigger update on next boot/reset
+            gcloud compute instances add-metadata ${{ env.INSTANCE_NAME }} \
+              --zone=${{ env.ZONE }} \
+              --metadata=deploy-version=${{ github.sha }}
+
+            # Reset instance to apply changes (triggers systemd to pull new image)
+            gcloud compute instances reset ${{ env.INSTANCE_NAME }} \
+              --zone=${{ env.ZONE }}
+
+            echo "Instance reset triggered. Waiting for startup..."
+            sleep 60
+          fi
 
       - name: Verify deployment
         run: |
