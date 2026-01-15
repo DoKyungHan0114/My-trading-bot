@@ -63,17 +63,46 @@ gcloud scheduler jobs create http $SCHEDULER_NAME \
     --attempt-deadline="60s" \
     --description="Trigger trading tick every minute during market hours"
 
+# ============================================
+# Daily Report Scheduler
+# ============================================
+DAILY_REPORT_SCHEDULER="tqqq-daily-report"
+
+# Delete existing daily report scheduler if exists
+if gcloud scheduler jobs describe $DAILY_REPORT_SCHEDULER --location=$REGION &>/dev/null; then
+    echo "Deleting existing daily report scheduler..."
+    gcloud scheduler jobs delete $DAILY_REPORT_SCHEDULER --location=$REGION --quiet
+fi
+
+# Create daily report scheduler - runs at 4:30 PM ET on weekdays
+echo "Creating daily report scheduler..."
+gcloud scheduler jobs create http $DAILY_REPORT_SCHEDULER \
+    --location=$REGION \
+    --schedule="30 16 * * 1-5" \
+    --time-zone="America/New_York" \
+    --uri="${SERVICE_URL}/api/reports/daily" \
+    --http-method=POST \
+    --oidc-service-account-email=$SA_EMAIL \
+    --oidc-token-audience=$SERVICE_URL \
+    --attempt-deadline="120s" \
+    --description="Send daily trading report after US market close"
+
 echo ""
 echo "============================================"
 echo "Cloud Scheduler setup complete!"
 echo "============================================"
 echo ""
-echo "Scheduler: $SCHEDULER_NAME"
-echo "Schedule: Every minute, Mon-Fri 9:30 AM - 4:00 PM ET"
-echo "Target: ${SERVICE_URL}/api/trading/tick"
+echo "Trading Tick Scheduler: $SCHEDULER_NAME"
+echo "  Schedule: Every minute, Mon-Fri 9:30 AM - 4:00 PM ET"
+echo "  Target: ${SERVICE_URL}/api/trading/tick"
+echo ""
+echo "Daily Report Scheduler: $DAILY_REPORT_SCHEDULER"
+echo "  Schedule: Mon-Fri 4:30 PM ET"
+echo "  Target: ${SERVICE_URL}/api/reports/daily"
 echo ""
 echo "To test manually:"
 echo "  gcloud scheduler jobs run $SCHEDULER_NAME --location=$REGION"
+echo "  gcloud scheduler jobs run $DAILY_REPORT_SCHEDULER --location=$REGION"
 echo ""
 echo "To view logs:"
 echo "  gcloud run services logs read $SERVICE_NAME --region=$REGION"

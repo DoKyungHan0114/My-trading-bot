@@ -559,13 +559,20 @@ class FirestoreClient:
         Returns:
             Heartbeat ID
         """
+        import pytz
+
         heartbeat_id = str(uuid4())
-        now = datetime.utcnow()
+        now_utc = datetime.utcnow()
+
+        # Use ET (US Eastern) for date to match trading day
+        # This ensures heartbeats are grouped by trading day, not UTC day
+        ET = pytz.timezone("America/New_York")
+        now_et = datetime.now(ET)
 
         doc = {
             "heartbeat_id": heartbeat_id,
-            "timestamp": now,
-            "date": now.strftime("%Y-%m-%d"),
+            "timestamp": now_utc,
+            "date": now_et.strftime("%Y-%m-%d"),  # ET date for trading day
             "status": status,
             "market_open": market_open,
             "signal_checked": signal_checked,

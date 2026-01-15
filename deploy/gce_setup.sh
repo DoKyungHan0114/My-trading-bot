@@ -10,7 +10,7 @@ ZONE="${GCE_ZONE:-us-central1-a}"
 REGION="${GCE_REGION:-us-central1}"
 INSTANCE_NAME="${GCE_INSTANCE:-tqqq-trading-bot}"
 MACHINE_TYPE="e2-small"
-USE_SPOT="true"
+USE_SPOT="false"
 SERVICE_ACCOUNT="tqqq-claude-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Artifact Registry

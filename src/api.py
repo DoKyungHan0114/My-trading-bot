@@ -509,6 +509,39 @@ async def trading_status():
         }
 
 
+@app.post("/api/reports/daily")
+async def send_daily_report_endpoint():
+    """
+    Send daily trading report to Discord.
+    Called by Cloud Scheduler after market close (e.g., 4:30 PM ET).
+    """
+    try:
+        from automation.daily_report import send_daily_report
+
+        success = send_daily_report()
+
+        if success:
+            return {
+                "status": "success",
+                "message": "Daily report sent to Discord",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to send daily report - check logs",
+                "timestamp": datetime.now().isoformat()
+            }
+
+    except Exception as e:
+        logger.exception(f"Daily report error: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
 # =========================================================================
 # COMMAND EXECUTION ENDPOINTS
 # =========================================================================
